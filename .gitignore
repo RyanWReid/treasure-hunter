@@ -1,0 +1,38 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Output
+*.jsonl
+treasure-hunter-results.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit actual credentials)
+.env
+.env.*

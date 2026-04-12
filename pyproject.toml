@@ -1,0 +1,23 @@
+[project]
+name = "treasure-hunter"
+version = "0.1.0"
+description = "Red team file discovery tool for Windows targets — finds valuable files using extension matching, keyword scanning, content analysis, and entropy heuristics."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+treasure-hunter = "treasure_hunter.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["treasure_hunter*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
