@@ -291,6 +291,12 @@ OPERATIONAL SECURITY:
     )
 
     parser.add_argument(
+        '-n', '--network',
+        metavar='TARGET',
+        help='Scan network shares (auto, hostname, IP, or CIDR like 10.0.0.0/24)'
+    )
+
+    parser.add_argument(
         '-o', '--output',
         default='treasure-hunter-results.jsonl',
         help='Output file for results (default: treasure-hunter-results.jsonl)'
@@ -312,6 +318,53 @@ OPERATIONAL SECURITY:
         '--min-score',
         type=int,
         help='Minimum score threshold for findings'
+    )
+
+    parser.add_argument(
+        '--html',
+        metavar='FILE',
+        help='Generate a self-contained HTML report'
+    )
+
+    parser.add_argument(
+        '--baseline',
+        metavar='FILE',
+        help='Previous results file — only report new findings (delta scan mode)'
+    )
+
+    parser.add_argument(
+        '--stage',
+        metavar='DIR',
+        help='Copy high-value findings to staging directory for exfiltration'
+    )
+
+    parser.add_argument(
+        '--compress',
+        action='store_true',
+        help='Compress staged files into a zip archive (use with --stage)'
+    )
+
+    parser.add_argument(
+        '--estimate',
+        action='store_true',
+        help='Estimate exfil size without copying files'
+    )
+
+    parser.add_argument(
+        '--encrypt',
+        action='store_true',
+        help='Encrypt output file with AES-256-GCM (prompts for passphrase)'
+    )
+
+    parser.add_argument(
+        '--passphrase',
+        help='Passphrase for output encryption (use with --encrypt)'
+    )
+
+    parser.add_argument(
+        '--decrypt',
+        metavar='FILE',
+        help='Decrypt a previously encrypted results file and exit'
     )
 
     parser.add_argument(
@@ -363,6 +416,20 @@ def main() -> int:
             print(f"  {name:8} - {profile.description}")
         return 0
 
+    if args.decrypt:
+        from .crypto import decrypt_file
+        passphrase = args.passphrase
+        if not passphrase:
+            import getpass
+            passphrase = getpass.getpass("Decryption passphrase: ")
+        out_path = args.decrypt.replace(".enc", "") if args.decrypt.endswith(".enc") else args.decrypt + ".dec"
+        if decrypt_file(args.decrypt, out_path, passphrase):
+            print(f"Decrypted: {out_path}")
+            return 0
+        else:
+            print("Decryption failed — wrong passphrase or corrupt file")
+            return 1
+
     # Setup logging
     if args.quiet:
         setup_logging(0)
@@ -382,8 +449,17 @@ def main() -> int:
         else:
             target_paths = filter_existing_paths(get_default_targets())
 
+        # Add network shares if requested
+        if args.network:
+            from .network import discover_network_paths
+            logger.info(f"Discovering network shares: {args.network}")
+            network_paths = discover_network_paths(args.network)
+            if network_paths:
+                logger.info(f"Adding {len(network_paths)} network share(s) to scan targets")
+                target_paths.extend(network_paths)
+
         if not target_paths:
-            print("❌ No accessible target directories found")
+            print("No accessible target directories found")
             return 1
 
         logger.info(f"Scanning {len(target_paths)} target paths")
@@ -417,7 +493,66 @@ def main() -> int:
         scanner = TreasureScanner(context)
         results = scanner.scan()
 
+        # Apply delta filter if baseline provided
+        if args.baseline:
+            from .delta import load_baseline, filter_new_findings
+            baseline = load_baseline(args.baseline)
+            results = filter_new_findings(results, baseline)
+            if not args.quiet:
+                print(f"\nDelta mode: {len(results.findings)} new findings (baseline: {args.baseline})")
+
         logger.info(f"Results saved to {args.output}")
+
+        # Exfil estimation
+        if args.estimate:
+            from .exfil import estimate_exfil_size
+            est = estimate_exfil_size(results)
+            if not args.quiet:
+                print(f"\nExfil estimate: {est['total_files']} files, {est['total_size_human']}")
+                for sev, size in est.get("by_severity", {}).items():
+                    print(f"  {sev}: {size}")
+
+        # Stage high-value files
+        if args.stage:
+            from .exfil import stage_findings, compress_staged
+            manifest = stage_findings(results, args.stage)
+            if not args.quiet:
+                print(f"\nStaged {manifest['total_files']} files ({manifest['total_size_human']}) to {args.stage}")
+
+            if args.compress:
+                zip_path = compress_staged(args.stage)
+                if not args.quiet:
+                    print(f"Archive: {zip_path}")
+
+                # Encrypt the archive if --encrypt is also set
+                if args.encrypt:
+                    from .crypto import encrypt_and_shred
+                    passphrase = args.passphrase
+                    if not passphrase:
+                        import getpass
+                        passphrase = getpass.getpass("Archive encryption passphrase: ")
+                    enc_path = encrypt_and_shred(zip_path, passphrase)
+                    if not args.quiet:
+                        print(f"Encrypted archive: {enc_path}")
+
+        # Encrypt output if requested
+        if args.encrypt:
+            from .crypto import encrypt_and_shred
+            passphrase = args.passphrase
+            if not passphrase:
+                import getpass
+                passphrase = getpass.getpass("Encryption passphrase: ")
+            enc_path = encrypt_and_shred(args.output, passphrase)
+            logger.info(f"Encrypted results: {enc_path} (plaintext shredded)")
+            if not args.quiet:
+                print(f"\nResults encrypted: {enc_path}")
+
+        # Generate HTML report if requested
+        if args.html:
+            from .report import generate_html_report
+            generate_html_report(results, args.html)
+            if not args.quiet:
+                print(f"\nHTML report: {args.html}")
 
         # Print summary unless quiet
         if not args.quiet:

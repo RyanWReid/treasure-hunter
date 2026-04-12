@@ -19,6 +19,29 @@ treasure-hunter -p full
 # Scan specific directory
 treasure-hunter -t C:\Users\target
 
+# Scan network shares (auto-discover, hostname, or CIDR)
+treasure-hunter --network auto
+treasure-hunter --network 10.0.0.0/24
+treasure-hunter --network fileserver.corp.local
+
+# Encrypt results (OPSEC — protects output if USB is seized)
+treasure-hunter -p full --encrypt --passphrase "my passphrase"
+
+# Decrypt results later
+treasure-hunter --decrypt results.jsonl.enc --passphrase "my passphrase"
+
+# Stage high-value files for exfiltration
+treasure-hunter -p full --stage /tmp/loot --compress
+
+# Delta scan (only show new findings since last run)
+treasure-hunter -p full --baseline previous-results.jsonl
+
+# Generate HTML report for engagement deliverable
+treasure-hunter -p full --html report.html
+
+# Estimate exfil size without copying
+treasure-hunter -p full --estimate
+
 # Scan-only mode (no credential extraction)
 treasure-hunter --no-grabbers
 
@@ -69,6 +92,20 @@ After file discovery, **15 grabber modules** parse and extract actual credential
 | `cert` | PFX/P12, PEM keys, GPG keyrings, Java KeyStores | Catalog |
 | `session` | RDP history, .rdp files, Terminal Server Client | Registry + file |
 | `process` | Process memory string scanning (disabled by default) | Memory read |
+| `clipboard` | Windows clipboard history + current clipboard | SQLite + ctypes |
+
+### Layer 3: Operational Features
+
+| Feature | Flag | Description |
+|---------|------|-------------|
+| **Output Encryption** | `--encrypt` | AES-256-GCM encryption of results with PBKDF2 key derivation |
+| **Network Scanning** | `--network` | SMB share enumeration via NetShareEnum + CIDR subnet probing |
+| **Exfil Staging** | `--stage DIR` | Copy high-value files to staging directory with manifest |
+| **Compression** | `--compress` | Zip staged files for exfiltration (combine with `--encrypt`) |
+| **Size Estimation** | `--estimate` | Estimate exfil payload size without copying |
+| **Delta Scanning** | `--baseline FILE` | Only report new findings compared to a previous scan |
+| **HTML Reports** | `--html FILE` | Self-contained dark-themed HTML report for deliverables |
+| **Decryption** | `--decrypt FILE` | Decrypt previously encrypted results |
 
 ## Scan Profiles
 
@@ -90,14 +127,19 @@ treasure-hunter -p stealth    # Minimal footprint
 
 ```
 treasure_hunter/
-├── cli.py                  # CLI with 4 scan profiles
-├── scanner.py              # Three-phase scan engine (Recon → Targeted → Grab → Sweep)
+├── cli.py                  # CLI with 4 scan profiles + operational flags
+├── scanner.py              # Four-phase scan engine (Recon → Targeted → Grab → Sweep)
 ├── models.py               # Finding, Signal, ScanResult data models
 ├── entropy.py              # Shannon entropy for secret detection
 ├── reporter.py             # Real-time JSONL streaming output
+├── crypto.py               # Output encryption (AES-256-GCM + PBKDF2)
+├── network.py              # SMB share enumeration + CIDR scanning
+├── exfil.py                # Exfiltration staging, compression, size estimation
+├── delta.py                # Delta/re-scan baseline comparison
+├── report.py               # Self-contained HTML report generator
 ├── rules/
 │   └── value_taxonomy.py   # 6 categories, 533 detection patterns
-└── grabbers/               # 15 credential extraction modules
+└── grabbers/               # 16 credential extraction modules
     ├── __init__.py          # Auto-discovery registry
     ├── base.py              # GrabberModule ABC + GrabberContext
     ├── models.py            # ExtractedCredential, GrabberResult
@@ -118,6 +160,7 @@ treasure_hunter/
     ├── dpapi.py             # DPAPI credential stores
     ├── registry.py          # PuTTY/WinSCP/AutoLogon
     ├── cert.py              # Certificates/keys/GPG
+    ├── clipboard.py         # Clipboard history + screenshots
     ├── process.py           # Process memory scanning
     └── session.py           # RDP/remote sessions
 ```
@@ -183,11 +226,14 @@ It will be auto-discovered by the registry — no registration needed.
 
 ## OPSEC
 
-- **Zero network connections** — all analysis is local
-- **Minimal disk writes** — only JSONL output file
+- **Zero network connections** — all analysis is local (unless `--network` is used)
+- **Encrypted output** — AES-256-GCM with `--encrypt` protects results if seized
+- **Shred after encrypt** — plaintext results overwritten with random data before deletion
+- **Minimal disk writes** — only JSONL output file (or encrypted .enc)
 - **No subprocess calls** — pure Python + ctypes (no PowerShell, no cmd)
 - **Graceful failures** — every module catches its own exceptions
 - **Copy-then-read** for locked SQLite DBs (Chrome, Firefox)
+- **Same-directory temp files** — avoids monitored %TEMP% directory
 - **Configurable thread limits** to avoid CPU spikes
 - **Process memory scanning disabled by default** (highest EDR risk)
 
@@ -200,12 +246,23 @@ pytest tests/ -v
 
 189 tests covering scanner engine, entropy analysis, value taxonomy, grabber framework, and individual module parsers.
 
+CI runs tests on Linux, Windows, and macOS across Python 3.10-3.12 via GitHub Actions.
+
 ## Building for Deployment
 
+Automated builds via GitHub Actions on tagged releases (push a `v*` tag to trigger):
+
+```bash
+# Tag a release → triggers automated Windows + Linux .exe builds
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Manual builds:
 ```bash
 # Nuitka (recommended — better AV evasion)
 pip install nuitka
-nuitka --standalone --onefile treasure_hunter/__main__.py -o treasure-hunter.exe
+python -m nuitka --standalone --onefile --output-filename=treasure-hunter.exe treasure_hunter/__main__.py
 
 # PyInstaller (faster builds)
 pip install pyinstaller
@@ -228,6 +285,12 @@ pyinstaller --onefile treasure_hunter/__main__.py --name treasure-hunter
 | Remote Desktop Protocol | T1021.001 | session |
 | SAM | T1003.002 | registry |
 | LSASS Memory | T1003.001 | process |
+| Clipboard Data | T1115 | clipboard |
+| Screen Capture | T1113 | clipboard |
+| Network Share Discovery | T1135 | network |
+| Data from Network Shared Drive | T1039 | network |
+| Local Data Staging | T1074.001 | exfil |
+| Archive Collected Data | T1560.001 | exfil |
 
 ## License
 
