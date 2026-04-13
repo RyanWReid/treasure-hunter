@@ -7,57 +7,57 @@ Unit tests validate parsing logic with fixture files. Integration tests validate
 ## Infrastructure
 
 **Target**: VM 303 on pve-hack (isolated security lab)
-- Windows 10 Evaluation (90-day license, free from Microsoft)
+- Windows Server 2022 Evaluation (180-day license, free from Microsoft)
 - 4GB RAM, 2 cores, 40GB virtio disk
 - Network: victim bridge (10.99.98.0/24) — isolated from LAN
 - Windows Defender disabled (will flag the tool)
 
+Windows Server has identical credential stores to Win10/11 (Chrome, registry,
+DPAPI, etc.) and Microsoft provides a direct-download ISO that works with wget.
+
 ## Setup Steps
 
-### 1. Download Windows 10 ISO
+### 1. Download Windows Server 2022 ISO
 
-Download from Microsoft Evaluation Center and upload to pve-hack:
 ```bash
-# On pve-hack
-wget -O /var/lib/vz/template/iso/win10-eval.iso \
-  "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/19045.2006.220908-0225.co_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso"
+# On pve-hack — direct wget link (no browser required)
+wget -O /var/lib/vz/template/iso/winserver-eval.iso \
+  "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
+
+# Also download VirtIO drivers
+wget -O /var/lib/vz/template/iso/virtio-win.iso \
+  "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 ```
 
 ### 2. Create VM 303
 
 ```bash
-# On pve-hack shell
+# On pve-hack shell (already done if using setup-treasure-target.sh)
 qm create 303 \
   --name treasure-target \
   --memory 4096 \
   --cores 2 \
   --sockets 1 \
-  --ostype win10 \
+  --ostype win11 \
   --net0 virtio,bridge=vmbr2 \
   --scsihw virtio-scsi-single \
   --scsi0 local-lvm:40,ssd=1 \
-  --cdrom local:iso/win10-eval.iso \
-  --boot order=scsi0;ide2 \
+  --ide0 local:iso/virtio-win.iso,media=cdrom \
+  --ide2 local:iso/winserver-eval.iso,media=cdrom \
+  --boot order='ide2;scsi0' \
   --agent 1 \
-  --bios ovmf \
-  --efidisk0 local-lvm:1 \
-  --machine q35
-
-# Download VirtIO drivers ISO (needed for Windows to see virtio disk)
-wget -O /var/lib/vz/template/iso/virtio-win.iso \
-  "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
-
-# Attach as second CD
-qm set 303 --ide0 local:iso/virtio-win.iso
+  --machine q35 \
+  --cpu host
 ```
 
-### 3. Install Windows
+### 3. Install Windows Server
 
 1. Boot VM 303, start Windows installer
-2. When it can't find disk: Load driver → browse virtio CD → vioscsi\w10\amd64
-3. Install Windows normally
-4. After install: install VirtIO guest agent + network driver from the ISO
-5. Set IP: `10.99.98.50/24` (no gateway — isolated)
+2. Select **"Windows Server 2022 Standard Evaluation (Desktop Experience)"**
+3. When it can't find disk: Load driver → browse virtio CD → vioscsi\w11\amd64
+4. Install normally (set a local admin password)
+5. After install: install VirtIO guest agent + network driver from the IDE0 CD
+6. Set IP: `10.99.98.50/24` (no gateway — isolated)
 
 ### 4. Disable Defender
 
