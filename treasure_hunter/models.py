@@ -111,6 +111,7 @@ class ScanResult:
     errors: list[str] = field(default_factory=list)
     skipped_paths: list[str] = field(default_factory=list)
     grabber_results: list[Any] = field(default_factory=list)  # list[GrabberResult]
+    lateral_result: Any = None  # LateralResult when lateral movement is enabled
 
     @property
     def critical_findings(self) -> list[Finding]:
@@ -152,7 +153,107 @@ class ScanResult:
             result["grabber_results"] = [
                 gr.to_dict() for gr in self.grabber_results
             ]
+        if self.lateral_result:
+            result["lateral_result"] = self.lateral_result.to_dict()
         return result
+
+
+class LateralAuthStatus(str, enum.Enum):
+    """Outcome of a single SMB authentication attempt."""
+
+    SUCCESS = "success"
+    ACCESS_DENIED = "access_denied"
+    WRONG_PASSWORD = "wrong_password"
+    HOST_UNREACHABLE = "host_unreachable"
+    ALREADY_CONNECTED = "already_connected"
+    LOGON_FAILURE = "logon_failure"
+    SKIPPED_LOCKOUT = "skipped_lockout"
+    ERROR = "error"
+
+
+@dataclass
+class CredentialTestResult:
+    """Result of one credential test against one host."""
+
+    host: str
+    share: str  # e.g., "C$"
+    username: str
+    credential_source: str  # source_module of the ExtractedCredential
+    status: LateralAuthStatus
+    error_code: int = 0
+    timestamp: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "host": self.host,
+            "share": self.share,
+            "username": self.username,
+            "credential_source": self.credential_source,
+            "status": self.status.value,
+            "error_code": self.error_code,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }
+
+
+@dataclass
+class LateralTarget:
+    """A discovered network host and its lateral movement status."""
+
+    host: str
+    port_open: bool = False
+    shares_discovered: list[str] = field(default_factory=list)
+    auth_results: list[CredentialTestResult] = field(default_factory=list)
+    compromised: bool = False
+    remote_scan_result: ScanResult | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "host": self.host,
+            "port_open": self.port_open,
+            "shares_discovered": self.shares_discovered,
+            "compromised": self.compromised,
+            "auth_attempts": len(self.auth_results),
+            "auth_successes": sum(
+                1 for r in self.auth_results
+                if r.status == LateralAuthStatus.SUCCESS
+            ),
+        }
+        if self.remote_scan_result:
+            result["remote_scan"] = {
+                "findings": len(self.remote_scan_result.findings),
+                "files_scanned": self.remote_scan_result.total_files_scanned,
+            }
+        return result
+
+
+@dataclass
+class LateralResult:
+    """Aggregate results from the lateral movement phase."""
+
+    started_at: datetime
+    completed_at: datetime | None = None
+    targets_discovered: int = 0
+    targets_compromised: int = 0
+    credentials_tested: int = 0
+    auth_successes: int = 0
+    auth_failures: int = 0
+    lockout_skips: int = 0
+    targets: list[LateralTarget] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "started_at": self.started_at.isoformat(),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "targets_discovered": self.targets_discovered,
+            "targets_compromised": self.targets_compromised,
+            "credentials_tested": self.credentials_tested,
+            "auth_successes": self.auth_successes,
+            "auth_failures": self.auth_failures,
+            "lockout_skips": self.lockout_skips,
+            "targets": [t.to_dict() for t in self.targets],
+            "errors": self.errors,
+        }
 
 
 def compute_severity(total_score: int) -> Severity:

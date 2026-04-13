@@ -6,12 +6,13 @@ systems for valuable files, extracts credentials from 16 application types,
 and scores findings using 533 detection patterns across 6 value categories.
 
 Key Features:
-- 4-phase scanning: Recon -> Targeted -> Grabber Extraction -> Sweep
+- 5-phase scanning: Recon -> Targeted -> Grabber -> Lateral Movement -> Sweep
 - 16 grabber modules: browser, cloud, remote access, git, dev tools,
   messaging, history, notes, email, wifi, DPAPI, registry, certs,
   clipboard, process memory, session data
 - 533 detection patterns across 6 weighted value categories
 - Pure-Python AES-CBC/GCM + DPAPI decryption (zero external dependencies)
+- Lateral movement: credential reuse against SMB admin shares
 - SMB network share discovery and scanning
 - Output encryption (AES-256-GCM), exfil staging, delta scanning
 - 4 scan profiles: smash (5m), triage (30m), full (2h+), stealth (8h+)
@@ -35,7 +36,7 @@ from .models import Finding, FileMetadata, ScanResult, Severity, compute_severit
 from .reporter import StreamingReporter
 from .scanner import ScanContext, TreasureScanner
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "treasure-hunter development team"
 
 __all__ = [
