@@ -1,4 +1,4 @@
-# Integration Testing — Windows Target VM
+# Integration Testing -- Windows Target VM
 
 ## Overview
 
@@ -6,10 +6,10 @@ Unit tests validate parsing logic with fixture files. Integration tests validate
 
 ## Infrastructure
 
-**Target**: VM 303 on pve-hack (isolated security lab)
+**Target**: An isolated Windows VM on a separate network segment
 - Windows Server 2022 Evaluation (180-day license, free from Microsoft)
 - 4GB RAM, 2 cores, 40GB virtio disk
-- Network: victim bridge (10.99.98.0/24) — isolated from LAN
+- Network: isolated bridge -- no route to production LAN
 - Windows Defender disabled (will flag the tool)
 
 Windows Server has identical credential stores to Win10/11 (Chrome, registry,
@@ -20,44 +20,30 @@ DPAPI, etc.) and Microsoft provides a direct-download ISO that works with wget.
 ### 1. Download Windows Server 2022 ISO
 
 ```bash
-# On pve-hack — direct wget link (no browser required)
-wget -O /var/lib/vz/template/iso/winserver-eval.iso \
+wget -O /path/to/iso/winserver-eval.iso \
   "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
 
 # Also download VirtIO drivers
-wget -O /var/lib/vz/template/iso/virtio-win.iso \
+wget -O /path/to/iso/virtio-win.iso \
   "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 ```
 
-### 2. Create VM 303
+### 2. Create the VM
 
-```bash
-# On pve-hack shell (already done if using setup-treasure-target.sh)
-qm create 303 \
-  --name treasure-target \
-  --memory 4096 \
-  --cores 2 \
-  --sockets 1 \
-  --ostype win11 \
-  --net0 virtio,bridge=vmbr2 \
-  --scsihw virtio-scsi-single \
-  --scsi0 local-lvm:40,ssd=1 \
-  --ide0 local:iso/virtio-win.iso,media=cdrom \
-  --ide2 local:iso/winserver-eval.iso,media=cdrom \
-  --boot order='ide2;scsi0' \
-  --agent 1 \
-  --machine q35 \
-  --cpu host
-```
+Create a VM with your hypervisor of choice (Proxmox, Hyper-V, VMware, etc.) using:
+- 4GB RAM, 2 cores
+- VirtIO disk + network
+- Both ISOs attached as CD drives
+- **Isolated network** -- do not bridge to production
 
 ### 3. Install Windows Server
 
-1. Boot VM 303, start Windows installer
+1. Boot VM, start Windows installer
 2. Select **"Windows Server 2022 Standard Evaluation (Desktop Experience)"**
-3. When it can't find disk: Load driver → browse virtio CD → vioscsi\w11\amd64
+3. When it can't find disk: Load driver -> browse virtio CD -> vioscsi\w11\amd64
 4. Install normally (set a local admin password)
-5. After install: install VirtIO guest agent + network driver from the IDE0 CD
-6. Set IP: `10.99.98.50/24` (no gateway — isolated)
+5. After install: install VirtIO guest agent + network driver from the CD
+6. Set a static IP on your isolated test network
 
 ### 4. Disable Defender
 
@@ -103,11 +89,10 @@ treasure-hunter.exe -p full -o results.jsonl --html report.html
 python validate_windows.py results.jsonl
 ```
 
-## Network Testing (from wraith/Kali)
+## Network Testing
 
-After local testing, test network scanning from the attack network:
+After local testing, test network scanning from a separate attack machine:
 ```bash
-# On wraith (10.99.99.20)
-# First enable SMB shares on the Windows VM
-treasure-hunter --network 10.99.98.50 -o network-results.jsonl
+# From your attack box on the same isolated network
+treasure-hunter --network <TARGET_IP> -o network-results.jsonl
 ```

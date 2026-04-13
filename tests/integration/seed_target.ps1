@@ -11,7 +11,7 @@
     Run this ONCE after Windows is installed and Defender is disabled.
 
 .NOTES
-    Target: VM 303 (treasure-target) on pve-hack victim network
+    Target: Isolated Windows test VM
     All credentials are FAKE — do not use on production systems
 #>
 

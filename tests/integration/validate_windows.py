@@ -278,7 +278,7 @@ class Validator:
         self.check(
             "NetworkScanner: (run separately with --network flag)",
             True,
-            "Validate manually from wraith"
+            "Validate manually from attack box"
         )
 
     def _check_encryption(self):
