@@ -1,17 +1,23 @@
 """
-TREASURE-HUNTER — Red Team File Discovery Tool
+TREASURE-HUNTER — Red Team File Discovery & Credential Extraction Tool
 
-A comprehensive file analysis tool designed for red team operations.
-Discovers and prioritizes valuable files on target systems using
-intelligent scoring based on file types, locations, content patterns,
-and metadata signals.
+The definitive file discovery tool for red team engagements. Scans target
+systems for valuable files, extracts credentials from 16 application types,
+and scores findings using 533 detection patterns across 6 value categories.
 
 Key Features:
-- Multi-threaded scanning with configurable profiles
-- Windows-focused value taxonomy covering 6 categories
-- Three-phase execution (Recon → Targeted → Sweep)
+- 4-phase scanning: Recon -> Targeted -> Grabber Extraction -> Sweep
+- 16 grabber modules: browser, cloud, remote access, git, dev tools,
+  messaging, history, notes, email, wifi, DPAPI, registry, certs,
+  clipboard, process memory, session data
+- 533 detection patterns across 6 weighted value categories
+- Pure-Python AES-CBC/GCM + DPAPI decryption (zero external dependencies)
+- SMB network share discovery and scanning
+- Output encryption (AES-256-GCM), exfil staging, delta scanning
+- 4 scan profiles: smash (5m), triage (30m), full (2h+), stealth (8h+)
 - JSONL streaming output for crash resilience
-- Minimal OPSEC footprint with graceful error handling
+- Self-contained HTML reports
+- Single .exe deployment via Nuitka
 
 Usage:
     from treasure_hunter import TreasureScanner, ScanContext
@@ -29,7 +35,7 @@ from .models import Finding, FileMetadata, ScanResult, Severity, compute_severit
 from .reporter import StreamingReporter
 from .scanner import ScanContext, TreasureScanner
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __author__ = "treasure-hunter development team"
 
 __all__ = [

@@ -1,7 +1,7 @@
 [project]
 name = "treasure-hunter"
-version = "0.1.0"
-description = "Red team file discovery tool for Windows targets — finds valuable files using extension matching, keyword scanning, content analysis, and entropy heuristics."
+version = "1.0.0"
+description = "Red team file discovery and credential extraction tool — 16 grabber modules, 533 detection patterns, pure-Python crypto, zero external dependencies."
 requires-python = ">=3.10"
 dependencies = []
 
