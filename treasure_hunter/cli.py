@@ -465,6 +465,12 @@ OPERATIONAL SECURITY:
     )
 
     parser.add_argument(
+        '--interactive', '-i',
+        action='store_true',
+        help='Launch interactive Captain\'s Deck console'
+    )
+
+    parser.add_argument(
         '--no-grabbers',
         action='store_true',
         help='Disable all grabber modules (scan-only mode)'
@@ -569,6 +575,10 @@ def main() -> int:
         for name, profile in SCAN_PROFILES.items():
             print(f"  {name:8} - {profile.description}")
         return 0
+
+    if args.interactive:
+        from .console import run_interactive
+        return run_interactive()
 
     if args.decrypt:
         from .crypto import decrypt_file
