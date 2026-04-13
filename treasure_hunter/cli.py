@@ -246,6 +246,26 @@ def print_summary(results: ScanResult) -> None:
             print(f"  {i}. {severity_tag} {path_display}")
             print(f"     Score: {finding.total_score} | Signals: {len(finding.signals)}")
 
+    # Credential audit
+    if results.credential_audit:
+        ca = results.credential_audit
+        if ca.total_passwords:
+            print(f"\n  CREDENTIAL AUDIT:")
+            print(f"  Passwords found:   {ca.total_passwords}")
+            print(f"  Unique passwords:  {ca.unique_passwords}")
+            if ca.reused_passwords:
+                print(f"  [!] Reused:        {len(ca.reused_passwords)} password(s) used on multiple services")
+            if ca.common_passwords:
+                print(f"  [!!] Common/default: {len(ca.common_passwords)} account(s)")
+            if ca.weak_passwords:
+                print(f"  [!] Weak:          {len(ca.weak_passwords)} account(s)")
+            if ca.high_value_accounts:
+                print(f"  [!!] Admin/service: {len(ca.high_value_accounts)} high-value account(s)")
+            if ca.strength_distribution:
+                dist = ca.strength_distribution
+                print(f"  Strength: {dist.get('strong', 0)} strong, {dist.get('good', 0)} good, "
+                      f"{dist.get('fair', 0)} fair, {dist.get('weak', 0)} weak")
+
     # Lateral movement results
     if results.lateral_result:
         lr = results.lateral_result

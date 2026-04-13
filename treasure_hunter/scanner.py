@@ -471,6 +471,7 @@ class TreasureScanner:
             skipped_paths=self.context.skipped_paths,
             grabber_results=grabber_results,
             lateral_result=getattr(self, '_lateral_result', None),
+            credential_audit=getattr(self, '_credential_audit', None),
         )
 
         # Finalize streaming output
@@ -632,6 +633,17 @@ class TreasureScanner:
             logger.info(f"Deduped credentials: {raw_count} -> {total_creds}")
         logger.info(f"Grabber phase complete: {total_creds} credentials extracted")
         self._emit_progress("GRABBER", f"{total_creds} credentials")
+
+        # Run credential quality audit
+        from .credential_audit import audit_credentials
+        self._credential_audit = audit_credentials(deduped)
+        if self._credential_audit.reused_passwords:
+            logger.info(f"Credential audit: {len(self._credential_audit.reused_passwords)} reused password(s)")
+        if self._reporter:
+            self._reporter.emit_credential({
+                "type": "credential_audit",
+                **self._credential_audit.to_dict(),
+            })
 
     def _lateral_phase(self) -> None:
         """Phase 4: Lateral movement -- test extracted creds against network hosts."""
