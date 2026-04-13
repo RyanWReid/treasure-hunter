@@ -2,7 +2,9 @@
 
 Red team file discovery, credential extraction, and lateral movement tool. Scans target systems for valuable files -- passwords, tokens, keys, configs, documents -- using intelligent scoring, extracts actual credential data, then uses stolen credentials to move laterally across the network.
 
-**Zero external dependencies.** Pure Python stdlib + ctypes. Compiles to a single executable via Nuitka for USB deployment.
+**Zero external dependencies.** Pure Python stdlib + ctypes. Compiles to a single **8.2 MB executable** for USB Rubber Ducky deployment.
+
+**397 tests** | **19 grabber modules** | **548 detection patterns** | **Lateral movement** | **Credential audit** | **USB auto-deploy**
 
 ## How It Works
 
@@ -23,6 +25,22 @@ flowchart LR
     style F fill:#16213e,stroke:#0f3460,color:#fff
     style G fill:#1a1a2e,stroke:#53d769,color:#fff
 ```
+
+## USB Deployment (Rubber Ducky / O.MG / Flipper)
+
+Plug in. Walk away. Pull out when USB ejects.
+
+```bash
+# Build the .exe (8.2 MB, single file)
+pip install pyinstaller
+pyinstaller --onefile --name treasure-hunter --console treasure_hunter/__main__.py
+
+# Copy to USB, flash the DuckyScript payload, done.
+# The --auto flag handles everything:
+treasure-hunter.exe --auto --passphrase "engagement-key"
+```
+
+`--auto` mode detects USB vs local, runs smash scan, encrypts output, cleans traces (Prefetch + PyInstaller temp), ejects USB. See [payloads/](payloads/) for ready-to-flash DuckyScript.
 
 ## Quick Start
 
@@ -166,7 +184,7 @@ flowchart LR
 
 ## Credential Extraction
 
-**16 grabber modules** parse and extract actual credential data:
+**19 grabber modules** parse and extract actual credential data:
 
 ```mermaid
 flowchart TD
@@ -237,6 +255,9 @@ flowchart TD
 | `registry` | PuTTY sessions, WinSCP, AutoLogon, SAM flagging | Registry read |
 | `cert` | PFX/P12, PEM keys, GPG keyrings, Java KeyStores | Catalog |
 | `session` | RDP history, .rdp files, Terminal Server Client | Registry + file |
+| `vault` | Windows Vault (web + Windows stored credentials) | Vault API ctypes |
+| `gpp` | Group Policy Preferences cpassword (MS14-025) | AES-256-CBC decrypt |
+| `schtask` | Scheduled tasks with stored passwords, inline creds | XML parse |
 | `process` | Process memory string scanning (disabled by default) | Memory read |
 | `clipboard` | Windows clipboard history + current clipboard | SQLite + ctypes |
 
@@ -315,6 +336,25 @@ treasure-hunter -p full       # Everything
 treasure-hunter -p stealth    # Minimal footprint
 ```
 
+## Credential Audit
+
+Post-scan analysis runs automatically after credential extraction:
+
+- **Password reuse detection** -- same password across multiple services
+- **Strength rating** -- weak/fair/good/strong per password
+- **Common password flagging** -- checks against top 50 breached passwords
+- **High-value account detection** -- admin, service, deploy, domain accounts
+- **Strength distribution** -- summary of your credential quality findings
+
+```
+CREDENTIAL AUDIT:
+  Passwords found:   11
+  Unique passwords:  11
+  [!] Weak:          1 account(s)
+  [!!] Admin/service: 7 high-value account(s)
+  Strength: 7 strong, 3 good, 0 fair, 1 weak
+```
+
 ## Operational Features
 
 | Feature | Flag | Description |
@@ -327,6 +367,8 @@ treasure-hunter -p stealth    # Minimal footprint
 | **Delta Scanning** | `--baseline FILE` | Only report new findings since last scan |
 | **HTML Reports** | `--html FILE` | Self-contained dark-themed HTML report |
 | **Decryption** | `--decrypt FILE` | Decrypt previously encrypted results |
+| **Auto Mode** | `--auto` | Fire-and-forget: scan + encrypt + cleanup + eject USB |
+| **Time Filter** | `--since DATE` | Only score files modified after date (YYYY-MM-DD) |
 
 ## Output Format
 
@@ -400,6 +442,7 @@ treasure_hunter/
 +-- cli.py                  # CLI entry point + 4 scan profiles
 +-- scanner.py              # 5-phase scan engine
 +-- lateral.py              # Lateral movement: credential reuse + remote scan
++-- credential_audit.py     # Post-scan password quality assessment
 +-- models.py               # Finding, Signal, ScanResult, LateralResult
 +-- entropy.py              # Shannon entropy for secret detection
 +-- reporter.py             # Real-time JSONL streaming output
@@ -434,6 +477,9 @@ treasure_hunter/
     +-- clipboard.py         # Clipboard history + screenshots
     +-- process.py           # Process memory scanning
     +-- session.py           # RDP/remote sessions
+    +-- vault.py             # Windows Vault (web + Windows creds)
+    +-- gpp.py               # Group Policy Preferences passwords
+    +-- schtask.py           # Scheduled task credentials
 ```
 
 ## Adding Grabber Modules
@@ -489,30 +535,22 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-237 tests covering scanner engine, entropy analysis, value taxonomy, grabber framework, individual module parsers, and lateral movement.
+397 tests covering every module: scanner engine, 19 grabber modules, lateral movement, credential audit, crypto, delta scanning, exfil staging, network discovery, HTML reports, JSONL streaming, and all data models.
 
 CI runs tests on Linux, Windows, and macOS across Python 3.10-3.12 via GitHub Actions.
 
 ## Building for Deployment
 
-Automated builds via GitHub Actions on tagged releases (push a `v*` tag to trigger):
-
 ```bash
-git tag v2.0.0
-git push origin v2.0.0
-```
-
-Manual builds:
-
-```bash
-# Nuitka (recommended -- better AV evasion)
-pip install nuitka
-python -m nuitka --standalone --onefile --output-filename=treasure-hunter.exe treasure_hunter/__main__.py
-
-# PyInstaller (faster builds)
+# PyInstaller (tested, 8.2 MB output)
 pip install pyinstaller
-pyinstaller --onefile treasure_hunter/__main__.py --name treasure-hunter
+pyinstaller --onefile --name treasure-hunter --console treasure_hunter/__main__.py
+# Output: dist/treasure-hunter.exe
 ```
+
+Automated builds via GitHub Actions on tagged releases (`v*` tags).
+
+**Tested:** Windows Server 2022, Python 3.12, PyInstaller 6.19 -- all 19 grabber modules, ctypes calls, auto-discovery working in the compiled .exe.
 
 ## MITRE ATT&CK Coverage
 
@@ -574,6 +612,8 @@ flowchart LR
 | SMB/Windows Admin Shares | T1021.002 | lateral |
 | Valid Accounts | T1078 | lateral |
 | Network Share Discovery | T1135 | network |
+| Group Policy Preferences | T1552.006 | gpp |
+| Scheduled Task/Job | T1053.005 | schtask |
 
 ## Disclaimer
 
