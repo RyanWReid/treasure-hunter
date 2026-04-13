@@ -70,7 +70,7 @@ def safe_read_text(file_path: str, max_size: int = 10 * 1024 * 1024) -> str | No
             return None
         if os.path.getsize(file_path) > max_size:
             return None
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(file_path, "r", encoding="utf-8-sig", errors="ignore") as f:
             return f.read(max_size)
     except (OSError, ValueError):
         return None
