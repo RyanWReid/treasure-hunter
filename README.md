@@ -4,6 +4,26 @@ Red team file discovery, credential extraction, and lateral movement tool. Scans
 
 **Zero external dependencies.** Pure Python stdlib + ctypes. Compiles to a single executable via Nuitka for USB deployment.
 
+## How It Works
+
+```mermaid
+flowchart LR
+    A[Deploy to Target] --> B[Phase 1: Recon]
+    B --> C[Phase 2: Targeted Scan]
+    C --> D[Phase 3: Credential Extraction]
+    D --> E[Phase 4: Lateral Movement]
+    E --> F[Phase 5: Sweep]
+    F --> G[Encrypted JSONL Output]
+
+    style A fill:#1a1a2e,stroke:#e94560,color:#fff
+    style B fill:#16213e,stroke:#0f3460,color:#fff
+    style C fill:#16213e,stroke:#0f3460,color:#fff
+    style D fill:#16213e,stroke:#e94560,color:#fff
+    style E fill:#16213e,stroke:#e94560,color:#fff
+    style F fill:#16213e,stroke:#0f3460,color:#fff
+    style G fill:#1a1a2e,stroke:#53d769,color:#fff
+```
+
 ## Quick Start
 
 ```bash
@@ -24,7 +44,7 @@ treasure-hunter --network auto
 treasure-hunter --network 10.0.0.0/24
 treasure-hunter --network fileserver.corp.local
 
-# Encrypt results (OPSEC — protects output if USB is seized)
+# Encrypt results (OPSEC -- protects output if USB is seized)
 treasure-hunter -p full --encrypt --passphrase "my passphrase"
 
 # Decrypt results later
@@ -39,9 +59,6 @@ treasure-hunter -p full --baseline previous-results.jsonl
 # Generate HTML report for engagement deliverable
 treasure-hunter -p full --html report.html
 
-# Estimate exfil size without copying
-treasure-hunter -p full --estimate
-
 # Lateral movement: test stolen creds against network hosts
 treasure-hunter -p full --lateral
 treasure-hunter -p full --lateral --lateral-targets 10.0.0.0/24
@@ -54,13 +71,62 @@ treasure-hunter --no-grabbers
 treasure-hunter --grabbers cloud_cred git_cred browser
 ```
 
-## What It Does
+## Scan Engine
 
-Treasure Hunter operates in four layers:
+```mermaid
+flowchart TD
+    subgraph Phase1["Phase 1: Recon"]
+        R1[os.scandir recursive walk] --> R2[Extract metadata]
+        R2 --> R3[Calculate priority score]
+        R3 --> R4[Build PriorityQueue]
+    end
 
-### Layer 1: File Discovery (Scanner Engine)
+    subgraph Phase2["Phase 2: Targeted Analysis"]
+        T1[Drain PriorityQueue] --> T2[Extension matching]
+        T2 --> T3[Keyword matching]
+        T3 --> T4[Path pattern matching]
+        T4 --> T5[Content regex analysis]
+        T5 --> T6[Entropy detection]
+        T6 --> T7{Score >= threshold?}
+        T7 -->|Yes| T8[Create Finding]
+        T7 -->|No| T9[Skip]
+    end
 
-A three-phase scan that finds valuable files using **533 detection patterns** across 6 value categories:
+    subgraph Phase3["Phase 3: Grabber Extraction"]
+        G1[GrabberRegistry auto-discovery] --> G2[16 grabber modules]
+        G2 --> G3[Parse/decrypt credentials]
+        G3 --> G4[ExtractedCredential objects]
+    end
+
+    subgraph Phase4["Phase 4: Lateral Movement"]
+        L1[Discover network hosts] --> L2[Port scan 445/TCP]
+        L2 --> L3[Build credential matrix]
+        L3 --> L4[SMB auth via WNetAddConnection2W]
+        L4 --> L5{Success?}
+        L5 -->|Yes| L6[Mount C$ + scan remote host]
+        L5 -->|No| L7[Track failure / lockout check]
+    end
+
+    subgraph Phase5["Phase 5: Sweep"]
+        S1[Scan remaining directories]
+        S1 --> S2[Catch missed files]
+    end
+
+    Phase1 --> Phase2
+    Phase2 --> Phase3
+    Phase3 --> Phase4
+    Phase4 --> Phase5
+
+    style Phase1 fill:#0d1117,stroke:#30363d,color:#c9d1d9
+    style Phase2 fill:#0d1117,stroke:#30363d,color:#c9d1d9
+    style Phase3 fill:#0d1117,stroke:#e94560,color:#c9d1d9
+    style Phase4 fill:#0d1117,stroke:#e94560,color:#c9d1d9
+    style Phase5 fill:#0d1117,stroke:#30363d,color:#c9d1d9
+```
+
+## Value Categories
+
+Files are scored using **533 detection patterns** across 6 weighted categories:
 
 | Category | Weight | What It Finds |
 |----------|--------|---------------|
@@ -71,18 +137,93 @@ A three-phase scan that finds valuable files using **533 detection patterns** ac
 | **Sensitive Documents** | 3 | PII, financials, legal docs, Outlook PST/OST |
 | **Source Code & IP** | 3 | Proprietary repos, build artifacts, design files |
 
-**Scan Phases:**
-1. **Recon** — Fast metadata sweep, build priority queues
-2. **Targeted** — Analyze high-value files first (credentials, recent files)
-3. **Sweep** — Comprehensive scan of remaining locations
+### Scoring System
 
-### Layer 2: Credential Extraction (Grabber Modules)
+```mermaid
+flowchart LR
+    subgraph Signals["Signal Sources"]
+        EXT["Extension match\ncategory_weight x 15"]
+        KW["Keyword match\ncategory_weight x 12"]
+        PATH["Path pattern\ncategory_weight x 20"]
+        CONTENT["Content regex\ncategory_weight x 10"]
+        RECENT["Recency bonus\n+10 to +15"]
+        ENT["High entropy\n+15 to +20"]
+    end
 
-After file discovery, **15 grabber modules** parse and extract actual credential data:
+    Signals --> SUM["Sum all signals"]
+    SUM --> SEV{Total Score}
 
-| Module | Targets | Decrypts? |
-|--------|---------|-----------|
-| `browser` | Chrome, Edge, Brave, Firefox saved passwords + cookies | DPAPI + AES-GCM |
+    SEV -->|"200+"| CRIT["CRITICAL"]
+    SEV -->|"120+"| HIGH["HIGH"]
+    SEV -->|"60+"| MED["MEDIUM"]
+    SEV -->|"25+"| LOW["LOW"]
+
+    style CRIT fill:#d32f2f,stroke:#b71c1c,color:#fff
+    style HIGH fill:#e65100,stroke:#bf360c,color:#fff
+    style MED fill:#f9a825,stroke:#f57f17,color:#000
+    style LOW fill:#2e7d32,stroke:#1b5e20,color:#fff
+```
+
+## Credential Extraction
+
+**16 grabber modules** parse and extract actual credential data:
+
+```mermaid
+flowchart TD
+    subgraph UserLevel["User-Level Grabbers"]
+        B[browser\nChrome/Edge/Firefox]
+        CL[cloud_cred\nAWS/Azure/GCP/k8s]
+        RA[remote_access\nFileZilla/WinSCP/mRemoteNG]
+        MSG[messaging\nSlack/Discord/Teams]
+        GIT[git_cred\n.git-credentials]
+        DEV[dev_tools\nVS Code/npm/Maven]
+        HIS[history\nPowerShell/Bash/Zsh]
+        NOT[notes\nSticky Notes/Obsidian]
+        EM[email\nOutlook/Thunderbird]
+        WF[wifi\nWiFi profiles]
+        SES[session\nRDP history]
+        CB[clipboard\nClipboard history]
+    end
+
+    subgraph AdminLevel["Admin-Level Grabbers"]
+        DP[dpapi\nCredential Manager]
+        REG[registry\nSAM/AutoLogon/PuTTY]
+        CRT[cert\nPFX/PEM/GPG keys]
+    end
+
+    subgraph SystemLevel["System-Level Grabbers"]
+        PROC[process\nProcess memory scan]
+    end
+
+    B --> OUT[ExtractedCredential]
+    CL --> OUT
+    RA --> OUT
+    MSG --> OUT
+    GIT --> OUT
+    DEV --> OUT
+    HIS --> OUT
+    NOT --> OUT
+    EM --> OUT
+    WF --> OUT
+    SES --> OUT
+    CB --> OUT
+    DP --> OUT
+    REG --> OUT
+    CRT --> OUT
+    PROC --> OUT
+
+    OUT --> LAT[Feed to Lateral Movement]
+
+    style UserLevel fill:#0d1117,stroke:#238636,color:#c9d1d9
+    style AdminLevel fill:#0d1117,stroke:#d29922,color:#c9d1d9
+    style SystemLevel fill:#0d1117,stroke:#d32f2f,color:#c9d1d9
+    style OUT fill:#161b22,stroke:#e94560,color:#fff
+    style LAT fill:#161b22,stroke:#e94560,color:#fff
+```
+
+| Module | Targets | Decryption |
+|--------|---------|------------|
+| `browser` | Chrome, Edge, Brave, Firefox passwords + cookies | DPAPI + AES-GCM |
 | `cloud_cred` | AWS, Azure, GCP, k8s, Docker, Terraform, Vault, GH CLI | Plaintext |
 | `remote_access` | FileZilla, WinSCP, mRemoteNG, MobaXterm | Base64 / AES-CBC |
 | `messaging` | Slack, Discord, Teams tokens from LevelDB | Plaintext |
@@ -90,7 +231,7 @@ After file discovery, **15 grabber modules** parse and extract actual credential
 | `dev_tools` | VS Code, Postman, npm, pip, Maven, Gradle, NuGet, Cargo | Plaintext |
 | `history` | PowerShell, Bash, Zsh command history | Regex scan |
 | `notes` | Windows Sticky Notes, Obsidian vaults | SQLite + regex |
-| `email` | Outlook PST/OST discovery, Thunderbird profiles | Metadata |
+| `email` | Outlook PST/OST, Thunderbird profiles | Metadata |
 | `wifi` | Windows WiFi profiles, Linux NetworkManager | XML / INI |
 | `dpapi` | Windows Credential Manager, DPAPI master keys | Catalog |
 | `registry` | PuTTY sessions, WinSCP, AutoLogon, SAM flagging | Registry read |
@@ -99,54 +240,73 @@ After file discovery, **15 grabber modules** parse and extract actual credential
 | `process` | Process memory string scanning (disabled by default) | Memory read |
 | `clipboard` | Windows clipboard history + current clipboard | SQLite + ctypes |
 
-### Layer 3: Lateral Movement
+## Lateral Movement
 
-After extracting credentials locally, tests them against discovered network hosts via SMB admin shares (C$). On successful authentication, mounts the remote filesystem and runs a scan.
+After extracting credentials locally, tests them against discovered network hosts via SMB admin shares (C$).
 
-| Feature | Description |
-|---------|-------------|
-| **Host Discovery** | Auto-discover from mapped drives, LOGONSERVER, DNS; or specify IPs/CIDRs |
-| **Credential Reuse** | Extracted passwords tested against network hosts via `WNetAddConnection2W` |
-| **Targeted Spray** | Credentials with matching hostnames (from remote access tools) tested first |
-| **Remote Scanning** | Successful auth mounts C$ share, runs smash-profile scan on remote files |
-| **Lockout Protection** | Per-account failure tracking, configurable threshold (default: 3) |
-| **Safety Rails** | Max hosts, hop depth limit, host whitelist/blacklist, TTL, kill switch |
-| **OPSEC** | `CONNECT_TEMPORARY` flag -- no persistent drive mappings, auto-cleanup |
+```mermaid
+flowchart TD
+    CREDS[Extracted Credentials] --> FILTER[Filter usable passwords]
+    FILTER --> DISC[Discover network hosts]
+    DISC --> PORT[Port check 445/TCP]
+    PORT --> MATRIX[Build credential matrix]
 
-```bash
-treasure-hunter -p full --lateral                              # auto-discover + spray
-treasure-hunter -p full --lateral --lateral-targets 10.0.0.0/24  # target subnet
-treasure-hunter -p full --lateral --lateral-max-hosts 5          # limit blast radius
-treasure-hunter -p full --lateral --lateral-max-failures 2       # strict lockout
+    subgraph Spray["Credential Spray Strategy"]
+        direction TB
+        TARGETED["Pass 1: Targeted\nMatch cred URLs to hosts"]
+        GENERAL["Pass 2: General\nAll remaining combinations"]
+        TARGETED --> GENERAL
+    end
+
+    MATRIX --> Spray
+    Spray --> AUTH["SMB Auth\nWNetAddConnection2W\nCONNECT_TEMPORARY"]
+    AUTH --> CHECK{Result?}
+
+    CHECK -->|"0 = Success"| MOUNT["Mount \\\\host\\C$"]
+    CHECK -->|"1326 = Logon Failure"| LOCKOUT["Record failure\nCheck lockout threshold"]
+    CHECK -->|"5 = Access Denied"| LOCKOUT
+    CHECK -->|"53 = Unreachable"| SKIP[Skip host]
+
+    MOUNT --> SCAN["Run smash-profile scan\non remote filesystem"]
+    SCAN --> FINDINGS["Remote findings\nstreamed to JSONL"]
+
+    LOCKOUT --> NEXT{Threshold reached?}
+    NEXT -->|Yes| SKIPUSER[Skip this username]
+    NEXT -->|No| NEXTCRED[Try next credential]
+
+    SCAN --> CLEANUP["Auto-cleanup\nWNetCancelConnection2W"]
+
+    style CREDS fill:#161b22,stroke:#e94560,color:#fff
+    style MOUNT fill:#161b22,stroke:#238636,color:#fff
+    style FINDINGS fill:#161b22,stroke:#238636,color:#fff
+    style LOCKOUT fill:#161b22,stroke:#d29922,color:#fff
+    style SKIPUSER fill:#161b22,stroke:#d32f2f,color:#fff
+    style Spray fill:#0d1117,stroke:#30363d,color:#c9d1d9
 ```
 
-### Layer 4: Operational Features
+### Safety Rails
 
-| Feature | Flag | Description |
-|---------|------|-------------|
-| **Output Encryption** | `--encrypt` | AES-256-GCM encryption of results with PBKDF2 key derivation |
-| **Network Scanning** | `--network` | SMB share enumeration via NetShareEnum + CIDR subnet probing |
-| **Exfil Staging** | `--stage DIR` | Copy high-value files to staging directory with manifest |
-| **Compression** | `--compress` | Zip staged files for exfiltration (combine with `--encrypt`) |
-| **Size Estimation** | `--estimate` | Estimate exfil payload size without copying |
-| **Delta Scanning** | `--baseline FILE` | Only report new findings compared to a previous scan |
-| **HTML Reports** | `--html FILE` | Self-contained dark-themed HTML report for deliverables |
-| **Decryption** | `--decrypt FILE` | Decrypt previously encrypted results |
-| **Lateral Movement** | `--lateral` | Test extracted creds against network hosts via SMB |
-| **Lateral Targets** | `--lateral-targets` | Override host discovery (auto, IP, CIDR, hostname) |
-| **Max Hosts** | `--lateral-max-hosts N` | Cap on hosts to attempt (default: 10) |
-| **Lockout Threshold** | `--lateral-max-failures N` | Max failures per account before skip (default: 3) |
-| **Hop Depth** | `--lateral-depth N` | Max propagation depth (default: 1) |
-| **SMB Timeout** | `--lateral-timeout N` | Connection timeout in seconds (default: 10) |
+| Rail | Default | Purpose |
+|------|---------|---------|
+| `--lateral` flag | Off | Explicit opt-in required |
+| `--lateral-max-hosts` | 10 | Limits blast radius |
+| `--lateral-max-failures` | 3 | Prevents account lockout |
+| `--lateral-depth` | 1 | No recursive propagation |
+| `--lateral-timeout` | 10s | Connection timeout per host |
+| Attempt delay | 0.5s | Avoids rate-limit detection |
+| Host whitelist/blacklist | Empty | Scope control |
+| Kill switch | Off | Abort all lateral operations |
+| `CONNECT_TEMPORARY` | Always | No persistent drive mappings |
+| Auto-cleanup | Always | Disconnects all shares on exit |
 
 ## Scan Profiles
 
-| Profile | Duration | Threads | Use Case |
-|---------|----------|---------|----------|
-| `smash` | 5 min | 16 | Quick smash-and-grab |
-| `triage` | 30 min | 12 | Operational planning |
-| `full` | No limit | 8 | Complete intelligence gathering |
-| `stealth` | No limit | 2 | Low-profile, minimal system impact |
+| Profile | Duration | Threads | Score Threshold | Use Case |
+|---------|----------|---------|-----------------|----------|
+| `smash` | 5 min | 16 | 50 | Quick smash-and-grab |
+| `triage` | 30 min | 12 | 35 | Operational planning |
+| `full` | No limit | 8 | 25 | Complete intelligence gathering |
+| `stealth` | No limit | 2 | 20 | Low-profile, minimal system impact |
 
 ```bash
 treasure-hunter -p smash      # Fast, high-confidence hits only
@@ -155,48 +315,18 @@ treasure-hunter -p full       # Everything
 treasure-hunter -p stealth    # Minimal footprint
 ```
 
-## Architecture
+## Operational Features
 
-```
-treasure_hunter/
-├── cli.py                  # CLI with 4 scan profiles + operational flags
-├── scanner.py              # Five-phase scan engine (Recon -> Targeted -> Grab -> Lateral -> Sweep)
-├── lateral.py              # Lateral movement: credential reuse + remote scanning
-├── models.py               # Finding, Signal, ScanResult, LateralResult data models
-├── entropy.py              # Shannon entropy for secret detection
-├── reporter.py             # Real-time JSONL streaming output
-├── crypto.py               # Output encryption (AES-256-GCM + PBKDF2)
-├── network.py              # SMB share enumeration + CIDR scanning
-├── exfil.py                # Exfiltration staging, compression, size estimation
-├── delta.py                # Delta/re-scan baseline comparison
-├── report.py               # Self-contained HTML report generator
-├── rules/
-│   └── value_taxonomy.py   # 6 categories, 533 detection patterns
-└── grabbers/               # 16 credential extraction modules
-    ├── __init__.py          # Auto-discovery registry
-    ├── base.py              # GrabberModule ABC + GrabberContext
-    ├── models.py            # ExtractedCredential, GrabberResult
-    ├── utils.py             # SQLite copy-read, safe I/O helpers
-    ├── _crypto.py           # AES-CBC, AES-GCM, DPAPI (pure Python)
-    ├── _leveldb.py          # Minimal LevelDB string extractor
-    ├── _registry.py         # Windows Registry safe-read wrappers
-    ├── browser.py           # Chrome/Edge/Brave/Firefox
-    ├── cloud_cred.py        # AWS/Azure/GCP/k8s/Docker/Terraform/Vault
-    ├── remote_access.py     # FileZilla/WinSCP/mRemoteNG/MobaXterm
-    ├── messaging.py         # Slack/Discord/Teams
-    ├── git_cred.py          # Git credential stores
-    ├── dev_tools.py         # VS Code/Postman/npm/pip/Maven/Gradle
-    ├── history.py           # Shell command history
-    ├── notes.py             # Sticky Notes/Obsidian
-    ├── email.py             # Outlook/Thunderbird
-    ├── wifi.py              # WiFi profiles
-    ├── dpapi.py             # DPAPI credential stores
-    ├── registry.py          # PuTTY/WinSCP/AutoLogon
-    ├── cert.py              # Certificates/keys/GPG
-    ├── clipboard.py         # Clipboard history + screenshots
-    ├── process.py           # Process memory scanning
-    └── session.py           # RDP/remote sessions
-```
+| Feature | Flag | Description |
+|---------|------|-------------|
+| **Output Encryption** | `--encrypt` | AES-256-GCM with PBKDF2 key derivation |
+| **Network Scanning** | `--network` | SMB share enumeration via NetShareEnum + CIDR probing |
+| **Exfil Staging** | `--stage DIR` | Copy high-value files to staging directory |
+| **Compression** | `--compress` | Zip staged files (combine with `--encrypt`) |
+| **Size Estimation** | `--estimate` | Estimate exfil payload size without copying |
+| **Delta Scanning** | `--baseline FILE` | Only report new findings since last scan |
+| **HTML Reports** | `--html FILE` | Self-contained dark-themed HTML report |
+| **Decryption** | `--decrypt FILE` | Decrypt previously encrypted results |
 
 ## Output Format
 
@@ -214,21 +344,97 @@ Results stream to a JSONL file in real-time (crash-resilient):
 {"type":"scan_complete","stats":{"total_files_scanned":12500,"total_findings":47,"total_credentials_harvested":23}}
 ```
 
-## Scoring System
+## Architecture
 
-Files are scored additively across multiple signal types:
+```mermaid
+flowchart TD
+    subgraph Core["Core Engine"]
+        CLI[cli.py\n4 scan profiles]
+        SCAN[scanner.py\n5-phase engine]
+        MOD[models.py\nFindings + scoring]
+        ENT[entropy.py\nSecret detection]
+        REP[reporter.py\nJSONL streaming]
+    end
 
-| Signal | Score |
-|--------|-------|
-| Extension match | `category_weight × 15` |
-| Keyword match | `category_weight × 12` |
-| Path pattern | `category_weight × 20` |
-| Content pattern | `category_weight × 10` |
-| Recency (< 30 days) | `+10 to +15` |
-| Entropy (high) | `+15 to +20` |
-| Grabber extraction | `+75 per credential` |
+    subgraph Discovery["Discovery & Network"]
+        NET[network.py\nSMB enumeration]
+        LAT[lateral.py\nCredential reuse]
+        TAX[rules/value_taxonomy.py\n533 patterns]
+    end
 
-**Severity thresholds:** CRITICAL (200+), HIGH (120+), MEDIUM (60+), LOW (25+)
+    subgraph Grabbers["16 Grabber Modules"]
+        GRAB[grabbers/__init__.py\nAuto-discovery registry]
+        BASE[grabbers/base.py\nGrabberModule ABC]
+        CRYPTO[grabbers/_crypto.py\nAES-CBC/GCM + DPAPI]
+        MODS["browser | cloud_cred | remote_access\nmessaging | git_cred | dev_tools\nhistory | notes | email | wifi\ndpapi | registry | cert\nclipboard | process | session"]
+    end
+
+    subgraph Operations["Operational Features"]
+        ENC[crypto.py\nAES-256-GCM encryption]
+        EXF[exfil.py\nStaging + compression]
+        DEL[delta.py\nBaseline comparison]
+        RPT[report.py\nHTML reports]
+    end
+
+    CLI --> SCAN
+    SCAN --> TAX
+    SCAN --> GRAB
+    SCAN --> NET
+    SCAN --> LAT
+    SCAN --> REP
+    GRAB --> BASE
+    BASE --> CRYPTO
+    BASE --> MODS
+    SCAN --> Operations
+
+    style Core fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
+    style Discovery fill:#0d1117,stroke:#e94560,color:#c9d1d9
+    style Grabbers fill:#0d1117,stroke:#238636,color:#c9d1d9
+    style Operations fill:#0d1117,stroke:#d29922,color:#c9d1d9
+```
+
+### File Structure
+
+```
+treasure_hunter/
++-- cli.py                  # CLI entry point + 4 scan profiles
++-- scanner.py              # 5-phase scan engine
++-- lateral.py              # Lateral movement: credential reuse + remote scan
++-- models.py               # Finding, Signal, ScanResult, LateralResult
++-- entropy.py              # Shannon entropy for secret detection
++-- reporter.py             # Real-time JSONL streaming output
++-- crypto.py               # Output encryption (AES-256-GCM + PBKDF2)
++-- network.py              # SMB share enumeration + CIDR scanning
++-- exfil.py                # Exfiltration staging + compression
++-- delta.py                # Delta/re-scan baseline comparison
++-- report.py               # Self-contained HTML report generator
++-- rules/
+|   +-- value_taxonomy.py   # 6 categories, 533 detection patterns
++-- grabbers/               # 16 credential extraction modules
+    +-- __init__.py          # Auto-discovery registry
+    +-- base.py              # GrabberModule ABC + GrabberContext
+    +-- models.py            # ExtractedCredential, GrabberResult
+    +-- utils.py             # SQLite copy-read, safe I/O helpers
+    +-- _crypto.py           # AES-CBC, AES-GCM, DPAPI (pure Python)
+    +-- _leveldb.py          # Minimal LevelDB string extractor
+    +-- _registry.py         # Windows Registry safe-read wrappers
+    +-- browser.py           # Chrome/Edge/Brave/Firefox
+    +-- cloud_cred.py        # AWS/Azure/GCP/k8s/Docker/Terraform/Vault
+    +-- remote_access.py     # FileZilla/WinSCP/mRemoteNG/MobaXterm
+    +-- messaging.py         # Slack/Discord/Teams
+    +-- git_cred.py          # Git credential stores
+    +-- dev_tools.py         # VS Code/Postman/npm/pip/Maven/Gradle
+    +-- history.py           # Shell command history
+    +-- notes.py             # Sticky Notes/Obsidian
+    +-- email.py             # Outlook/Thunderbird
+    +-- wifi.py              # WiFi profiles
+    +-- dpapi.py             # DPAPI credential stores
+    +-- registry.py          # PuTTY/WinSCP/AutoLogon
+    +-- cert.py              # Certificates/keys/GPG
+    +-- clipboard.py         # Clipboard history + screenshots
+    +-- process.py           # Process memory scanning
+    +-- session.py           # RDP/remote sessions
+```
 
 ## Adding Grabber Modules
 
@@ -236,7 +442,7 @@ Drop a `.py` file in `treasure_hunter/grabbers/` with a class inheriting `Grabbe
 
 ```python
 from treasure_hunter.grabbers.base import GrabberModule, GrabberContext
-from treasure_hunter.grabbers.models import ExtractedCredential, GrabberResult, GrabberStatus
+from treasure_hunter.grabbers.models import ExtractedCredential, GrabberResult
 
 class MyGrabber(GrabberModule):
     name = "my_grabber"
@@ -248,7 +454,6 @@ class MyGrabber(GrabberModule):
 
     def execute(self, context: GrabberContext) -> GrabberResult:
         result = GrabberResult(module_name=self.name)
-        # ... extract credentials ...
         result.credentials.append(ExtractedCredential(
             source_module=self.name,
             credential_type="password",
@@ -259,18 +464,18 @@ class MyGrabber(GrabberModule):
         return result
 ```
 
-It will be auto-discovered by the registry — no registration needed.
+Auto-discovered by the registry -- no registration needed.
 
 ## OPSEC
 
-- **Zero network connections** — all analysis is local (unless `--network` is used)
-- **Encrypted output** — AES-256-GCM with `--encrypt` protects results if seized
-- **Shred after encrypt** — plaintext results overwritten with random data before deletion
-- **Minimal disk writes** — only JSONL output file (or encrypted .enc)
-- **No subprocess calls** — pure Python + ctypes (no PowerShell, no cmd)
-- **Graceful failures** — every module catches its own exceptions
+- **Zero network connections** -- all analysis is local (unless `--network` or `--lateral` is used)
+- **Encrypted output** -- AES-256-GCM with `--encrypt` protects results if seized
+- **Shred after encrypt** -- plaintext results overwritten with random data before deletion
+- **Minimal disk writes** -- only JSONL output file (or encrypted .enc)
+- **No subprocess calls** -- pure Python + ctypes (no PowerShell, no cmd)
+- **Graceful failures** -- every module catches its own exceptions
 - **Copy-then-read** for locked SQLite DBs (Chrome, Firefox)
-- **Same-directory temp files** — avoids monitored %TEMP% directory
+- **Same-directory temp files** -- avoids monitored %TEMP% directory
 - **Configurable thread limits** to avoid CPU spikes
 - **Process memory scanning disabled by default** (highest EDR risk)
 - **Lateral movement opt-in** (`--lateral` required) with lockout protection
@@ -293,14 +498,14 @@ CI runs tests on Linux, Windows, and macOS across Python 3.10-3.12 via GitHub Ac
 Automated builds via GitHub Actions on tagged releases (push a `v*` tag to trigger):
 
 ```bash
-# Tag a release → triggers automated Windows + Linux .exe builds
-git tag v0.1.0
-git push origin v0.1.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 Manual builds:
+
 ```bash
-# Nuitka (recommended — better AV evasion)
+# Nuitka (recommended -- better AV evasion)
 pip install nuitka
 python -m nuitka --standalone --onefile --output-filename=treasure-hunter.exe treasure_hunter/__main__.py
 
@@ -311,9 +516,51 @@ pyinstaller --onefile treasure_hunter/__main__.py --name treasure-hunter
 
 ## MITRE ATT&CK Coverage
 
+```mermaid
+flowchart LR
+    subgraph Collection["Collection"]
+        T1005["T1005\nData from\nLocal System"]
+        T1039["T1039\nData from\nNetwork Drive"]
+        T1114["T1114.001\nLocal Email"]
+        T1115["T1115\nClipboard Data"]
+        T1113["T1113\nScreen Capture"]
+        T1074["T1074.001\nLocal Staging"]
+        T1560["T1560.001\nArchive Data"]
+    end
+
+    subgraph CredAccess["Credential Access"]
+        T1552a["T1552.001\nCreds in Files"]
+        T1552b["T1552.002\nCreds in Registry"]
+        T1552c["T1552.003\nBash History"]
+        T1552d["T1552.004\nPrivate Keys"]
+        T1555a["T1555.003\nBrowser Creds"]
+        T1555b["T1555.004\nCredential Manager"]
+        T1528["T1528\nApp Access Tokens"]
+        T1003a["T1003.001\nLSASS Memory"]
+        T1003b["T1003.002\nSAM"]
+    end
+
+    subgraph LateralMov["Lateral Movement"]
+        T1021a["T1021.001\nRDP"]
+        T1021b["T1021.002\nSMB Admin Shares"]
+        T1078["T1078\nValid Accounts"]
+        T1135["T1135\nShare Discovery"]
+    end
+
+    style Collection fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
+    style CredAccess fill:#0d1117,stroke:#e94560,color:#c9d1d9
+    style LateralMov fill:#0d1117,stroke:#d29922,color:#c9d1d9
+```
+
 | Technique | ID | Modules |
 |-----------|-----|---------|
-| Data from Local System | T1005 | Scanner, notes, wifi |
+| Data from Local System | T1005 | scanner, notes, wifi |
+| Data from Network Shared Drive | T1039 | network |
+| Local Email Collection | T1114.001 | email |
+| Clipboard Data | T1115 | clipboard |
+| Screen Capture | T1113 | clipboard |
+| Local Data Staging | T1074.001 | exfil |
+| Archive Collected Data | T1560.001 | exfil |
 | Credentials In Files | T1552.001 | cloud_cred, git_cred, dev_tools, remote_access |
 | Credentials in Registry | T1552.002 | registry |
 | Bash History | T1552.003 | history |
@@ -321,18 +568,12 @@ pyinstaller --onefile treasure_hunter/__main__.py --name treasure-hunter
 | Credentials from Web Browsers | T1555.003 | browser |
 | Windows Credential Manager | T1555.004 | dpapi |
 | Steal Application Access Token | T1528 | messaging |
-| Local Email Collection | T1114.001 | email |
-| Remote Desktop Protocol | T1021.001 | session |
-| SAM | T1003.002 | registry |
 | LSASS Memory | T1003.001 | process |
-| Clipboard Data | T1115 | clipboard |
-| Screen Capture | T1113 | clipboard |
-| Network Share Discovery | T1135 | network |
-| Data from Network Shared Drive | T1039 | network |
+| SAM | T1003.002 | registry |
+| Remote Desktop Protocol | T1021.001 | session |
 | SMB/Windows Admin Shares | T1021.002 | lateral |
 | Valid Accounts | T1078 | lateral |
-| Local Data Staging | T1074.001 | exfil |
-| Archive Collected Data | T1560.001 | exfil |
+| Network Share Discovery | T1135 | network |
 
 ## License
 
