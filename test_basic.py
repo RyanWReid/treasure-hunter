@@ -14,7 +14,7 @@ from treasure_hunter import TreasureScanner, ScanContext
 
 def test_basic_functionality():
     """Test that the scanner can detect valuable files."""
-    print("🧪 Running basic functionality test...")
+    print("[*] Running basic functionality test...")
 
     # Create a temporary directory with test files
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -39,7 +39,7 @@ def test_basic_functionality():
             else:
                 file_path.write_bytes(content)
 
-        print(f"📁 Created {len(test_files)} test files in {temp_dir}")
+        print(f"    Created {len(test_files)} test files in {temp_dir}")
 
         # Run scan
         context = ScanContext(
@@ -53,47 +53,47 @@ def test_basic_functionality():
         results = scanner.scan()
 
         # Verify results
-        print(f"📊 Scan completed:")
-        print(f"   Files scanned: {results.total_files_scanned}")
-        print(f"   Findings: {len(results.findings)}")
-        print(f"   Errors: {len(results.errors)}")
+        print(f"    Scan completed:")
+        print(f"      Files scanned: {results.total_files_scanned}")
+        print(f"      Findings: {len(results.findings)}")
+        print(f"      Errors: {len(results.errors)}")
 
         # Check for expected findings
         expected_findings = {'passwords.txt', 'id_rsa', 'database.kdbx', 'config.env', 'remote.rdp', 'backup.sql'}
         found_files = set()
 
-        print(f"\n🔍 Detailed findings:")
+        print(f"\n    Detailed findings:")
         for finding in sorted(results.findings, key=lambda x: x.total_score, reverse=True):
             filename = Path(finding.file_path).name
             found_files.add(filename)
 
-            severity_emoji = {
-                5: "🚨", 4: "🔴", 3: "🟡", 2: "🟢", 1: "ℹ️"
-            }.get(finding.severity.value, "❓")
+            severity_tag = {
+                5: "[!!]", 4: "[!]", 3: "[*]", 2: "[-]", 1: "[i]"
+            }.get(finding.severity.value, "[?]")
 
-            print(f"   {severity_emoji} {filename} (score: {finding.total_score})")
+            print(f"      {severity_tag} {filename} (score: {finding.total_score})")
 
             for signal in finding.signals:
-                print(f"      - {signal.description}")
+                print(f"          - {signal.description}")
 
         # Verify we found most of the valuable files
         missing_files = expected_findings - found_files
         if missing_files:
-            print(f"\n⚠️  Expected but not found: {missing_files}")
+            print(f"\n    [!] Expected but not found: {missing_files}")
 
         # Should NOT find normal_file.txt (unless it has surprising signals)
         if 'normal_file.txt' in found_files:
-            print(f"⚠️  Unexpectedly found: normal_file.txt")
+            print(f"    [!] Unexpectedly found: normal_file.txt")
 
         success = len(found_files) >= 4  # At least 4 of 6 valuable files found
-        print(f"\n{'✅ Test PASSED' if success else '❌ Test FAILED'}")
+        print(f"\n    {'[+] Test PASSED' if success else '[X] Test FAILED'}")
 
         return success
 
 
 def test_cli_help():
     """Test that the CLI interface can be imported and shows help."""
-    print("\n🧪 Testing CLI interface...")
+    print("\n[*] Testing CLI interface...")
 
     try:
         from treasure_hunter.cli import create_parser
@@ -117,19 +117,19 @@ def test_cli_help():
                 missing_elements.append(element)
 
         if missing_elements:
-            print(f"❌ Missing help elements: {missing_elements}")
+            print(f"    [X] Missing help elements: {missing_elements}")
             return False
         else:
-            print("✅ CLI help format looks good")
+            print("    [+] CLI help format looks good")
             return True
 
     except Exception as e:
-        print(f"❌ CLI test failed: {e}")
+        print(f"    [X] CLI test failed: {e}")
         return False
 
 
 if __name__ == '__main__':
-    print("🏴‍☠️  TREASURE-HUNTER Basic Test Suite")
+    print("TREASURE-HUNTER Basic Test Suite")
     print("="*50)
 
     all_passed = True
@@ -138,20 +138,20 @@ if __name__ == '__main__':
     try:
         all_passed &= test_basic_functionality()
     except Exception as e:
-        print(f"❌ Basic functionality test failed: {e}")
+        print(f"[X] Basic functionality test failed: {e}")
         all_passed = False
 
     # Test CLI
     try:
         all_passed &= test_cli_help()
     except Exception as e:
-        print(f"❌ CLI test failed: {e}")
+        print(f"[X] CLI test failed: {e}")
         all_passed = False
 
     print("\n" + "="*50)
     if all_passed:
-        print("🎉 All tests PASSED!")
+        print("[+] All tests PASSED!")
         exit(0)
     else:
-        print("💥 Some tests FAILED!")
+        print("[X] Some tests FAILED!")
         exit(1)
