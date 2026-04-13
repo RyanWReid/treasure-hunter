@@ -575,6 +575,19 @@ flowchart LR
 | Valid Accounts | T1078 | lateral |
 | Network Share Discovery | T1135 | network |
 
+## Disclaimer
+
+This tool is provided for **authorized security testing**, **red team engagements**, and **educational purposes only**. Use of this tool against systems you do not own or have explicit written permission to test is illegal and unethical.
+
+By using this tool, you agree that:
+
+- You have **written authorization** from the system owner to perform security testing
+- You accept **full responsibility** for your actions and any consequences
+- The authors are **not liable** for any misuse, damage, or legal issues arising from use of this tool
+- You will comply with all applicable **local, state, federal, and international laws**
+
+This tool is intended for professional penetration testers, red team operators, and security researchers operating under a signed Rules of Engagement (RoE) or equivalent authorization.
+
 ## License
 
-For authorized security testing, red team engagements, and educational purposes only.
+MIT License -- see [LICENSE](LICENSE) for details.
