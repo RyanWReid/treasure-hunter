@@ -78,6 +78,36 @@ class StreamingReporter:
             **credential_dict
         })
 
+    def emit_lateral_attempt(self, attempt_dict: dict) -> None:
+        """Queue a lateral movement auth attempt for writing. Thread-safe."""
+        if not self._started:
+            return
+
+        self._queue.put({
+            'type': 'lateral_attempt',
+            **attempt_dict,
+        })
+
+    def emit_lateral_success(self, success_dict: dict) -> None:
+        """Queue a lateral movement success event for writing. Thread-safe."""
+        if not self._started:
+            return
+
+        self._queue.put({
+            'type': 'lateral_success',
+            **success_dict,
+        })
+
+    def emit_lateral_summary(self, summary_dict: dict) -> None:
+        """Queue the lateral movement phase summary for writing. Thread-safe."""
+        if not self._started:
+            return
+
+        self._queue.put({
+            'type': 'lateral_summary',
+            **summary_dict,
+        })
+
     def stop(self, results: ScanResult) -> None:
         """Flush remaining findings and write the final summary."""
         if not self._started:

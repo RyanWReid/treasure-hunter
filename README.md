@@ -1,6 +1,6 @@
 # Treasure Hunter
 
-Red team file discovery and credential extraction tool. Scans target systems for valuable files — passwords, tokens, keys, configs, documents — using intelligent scoring, then extracts the actual credential data from discovered artifacts.
+Red team file discovery, credential extraction, and lateral movement tool. Scans target systems for valuable files -- passwords, tokens, keys, configs, documents -- using intelligent scoring, extracts actual credential data, then uses stolen credentials to move laterally across the network.
 
 **Zero external dependencies.** Pure Python stdlib + ctypes. Compiles to a single executable via Nuitka for USB deployment.
 
@@ -42,6 +42,11 @@ treasure-hunter -p full --html report.html
 # Estimate exfil size without copying
 treasure-hunter -p full --estimate
 
+# Lateral movement: test stolen creds against network hosts
+treasure-hunter -p full --lateral
+treasure-hunter -p full --lateral --lateral-targets 10.0.0.0/24
+treasure-hunter -p full --lateral --lateral-max-hosts 5
+
 # Scan-only mode (no credential extraction)
 treasure-hunter --no-grabbers
 
@@ -51,7 +56,7 @@ treasure-hunter --grabbers cloud_cred git_cred browser
 
 ## What It Does
 
-Treasure Hunter operates in two layers:
+Treasure Hunter operates in four layers:
 
 ### Layer 1: File Discovery (Scanner Engine)
 
@@ -94,7 +99,28 @@ After file discovery, **15 grabber modules** parse and extract actual credential
 | `process` | Process memory string scanning (disabled by default) | Memory read |
 | `clipboard` | Windows clipboard history + current clipboard | SQLite + ctypes |
 
-### Layer 3: Operational Features
+### Layer 3: Lateral Movement
+
+After extracting credentials locally, tests them against discovered network hosts via SMB admin shares (C$). On successful authentication, mounts the remote filesystem and runs a scan.
+
+| Feature | Description |
+|---------|-------------|
+| **Host Discovery** | Auto-discover from mapped drives, LOGONSERVER, DNS; or specify IPs/CIDRs |
+| **Credential Reuse** | Extracted passwords tested against network hosts via `WNetAddConnection2W` |
+| **Targeted Spray** | Credentials with matching hostnames (from remote access tools) tested first |
+| **Remote Scanning** | Successful auth mounts C$ share, runs smash-profile scan on remote files |
+| **Lockout Protection** | Per-account failure tracking, configurable threshold (default: 3) |
+| **Safety Rails** | Max hosts, hop depth limit, host whitelist/blacklist, TTL, kill switch |
+| **OPSEC** | `CONNECT_TEMPORARY` flag -- no persistent drive mappings, auto-cleanup |
+
+```bash
+treasure-hunter -p full --lateral                              # auto-discover + spray
+treasure-hunter -p full --lateral --lateral-targets 10.0.0.0/24  # target subnet
+treasure-hunter -p full --lateral --lateral-max-hosts 5          # limit blast radius
+treasure-hunter -p full --lateral --lateral-max-failures 2       # strict lockout
+```
+
+### Layer 4: Operational Features
 
 | Feature | Flag | Description |
 |---------|------|-------------|
@@ -106,6 +132,12 @@ After file discovery, **15 grabber modules** parse and extract actual credential
 | **Delta Scanning** | `--baseline FILE` | Only report new findings compared to a previous scan |
 | **HTML Reports** | `--html FILE` | Self-contained dark-themed HTML report for deliverables |
 | **Decryption** | `--decrypt FILE` | Decrypt previously encrypted results |
+| **Lateral Movement** | `--lateral` | Test extracted creds against network hosts via SMB |
+| **Lateral Targets** | `--lateral-targets` | Override host discovery (auto, IP, CIDR, hostname) |
+| **Max Hosts** | `--lateral-max-hosts N` | Cap on hosts to attempt (default: 10) |
+| **Lockout Threshold** | `--lateral-max-failures N` | Max failures per account before skip (default: 3) |
+| **Hop Depth** | `--lateral-depth N` | Max propagation depth (default: 1) |
+| **SMB Timeout** | `--lateral-timeout N` | Connection timeout in seconds (default: 10) |
 
 ## Scan Profiles
 
@@ -128,8 +160,9 @@ treasure-hunter -p stealth    # Minimal footprint
 ```
 treasure_hunter/
 ├── cli.py                  # CLI with 4 scan profiles + operational flags
-├── scanner.py              # Four-phase scan engine (Recon → Targeted → Grab → Sweep)
-├── models.py               # Finding, Signal, ScanResult data models
+├── scanner.py              # Five-phase scan engine (Recon -> Targeted -> Grab -> Lateral -> Sweep)
+├── lateral.py              # Lateral movement: credential reuse + remote scanning
+├── models.py               # Finding, Signal, ScanResult, LateralResult data models
 ├── entropy.py              # Shannon entropy for secret detection
 ├── reporter.py             # Real-time JSONL streaming output
 ├── crypto.py               # Output encryption (AES-256-GCM + PBKDF2)
@@ -174,6 +207,10 @@ Results stream to a JSONL file in real-time (crash-resilient):
 {"type":"finding","file_path":"...\\Login Data","severity":"CRITICAL","total_score":225,"signals":[...]}
 {"type":"credential","source_module":"cloud_cred","credential_type":"key","target_application":"AWS","username":"AKIAEXAMPLE"}
 {"type":"credential","source_module":"browser","credential_type":"password","target_application":"Chrome","url":"https://mail.google.com"}
+{"type":"lateral_attempt","host":"10.0.0.5","share":"C$","username":"admin","status":"logon_failure","error_code":1326}
+{"type":"lateral_success","host":"10.0.0.5","share":"C$","username":"svc_backup","credential_source":"remote_access"}
+{"type":"finding","file_path":"\\\\10.0.0.5\\C$\\Users\\...","severity":"HIGH","total_score":150,"signals":[...]}
+{"type":"lateral_summary","targets_discovered":8,"targets_compromised":2,"credentials_tested":24}
 {"type":"scan_complete","stats":{"total_files_scanned":12500,"total_findings":47,"total_credentials_harvested":23}}
 ```
 
@@ -236,6 +273,9 @@ It will be auto-discovered by the registry — no registration needed.
 - **Same-directory temp files** — avoids monitored %TEMP% directory
 - **Configurable thread limits** to avoid CPU spikes
 - **Process memory scanning disabled by default** (highest EDR risk)
+- **Lateral movement opt-in** (`--lateral` required) with lockout protection
+- **CONNECT_TEMPORARY** for SMB -- no persistent drive mappings
+- **Auto-cleanup** disconnects all mounted shares on exit
 
 ## Testing
 
@@ -244,7 +284,7 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-189 tests covering scanner engine, entropy analysis, value taxonomy, grabber framework, and individual module parsers.
+237 tests covering scanner engine, entropy analysis, value taxonomy, grabber framework, individual module parsers, and lateral movement.
 
 CI runs tests on Linux, Windows, and macOS across Python 3.10-3.12 via GitHub Actions.
 
@@ -289,6 +329,8 @@ pyinstaller --onefile treasure_hunter/__main__.py --name treasure-hunter
 | Screen Capture | T1113 | clipboard |
 | Network Share Discovery | T1135 | network |
 | Data from Network Shared Drive | T1039 | network |
+| SMB/Windows Admin Shares | T1021.002 | lateral |
+| Valid Accounts | T1078 | lateral |
 | Local Data Staging | T1074.001 | exfil |
 | Archive Collected Data | T1560.001 | exfil |
 
