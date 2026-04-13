@@ -217,37 +217,37 @@ def print_summary(results: ScanResult) -> None:
     print(f"Files scanned: {results.total_files_scanned:,}")
     print(f"Directories scanned: {results.total_dirs_scanned:,}")
 
-    print(f"\n📊 FINDINGS BREAKDOWN:")
+    print(f"\n  FINDINGS BREAKDOWN:")
     critical = [f for f in results.findings if f.severity.value >= 5]
     high = [f for f in results.findings if f.severity.value >= 4]
     medium = [f for f in results.findings if f.severity.value >= 3]
     low = [f for f in results.findings if f.severity.value >= 2]
 
-    print(f"  🚨 CRITICAL: {len(critical):,}")
-    print(f"  🔴 HIGH:     {len(high):,}")
-    print(f"  🟡 MEDIUM:   {len(medium):,}")
-    print(f"  🟢 LOW:      {len(low):,}")
-    print(f"  📈 TOTAL:    {len(results.findings):,}")
+    print(f"  [!!] CRITICAL: {len(critical):,}")
+    print(f"  [!]  HIGH:     {len(high):,}")
+    print(f"  [*]  MEDIUM:   {len(medium):,}")
+    print(f"  [-]  LOW:      {len(low):,}")
+    print(f"  [=]  TOTAL:    {len(results.findings):,}")
 
     # Show top findings
     if results.findings:
-        print(f"\n🏆 TOP FINDINGS:")
+        print(f"\n  TOP FINDINGS:")
         top_findings = sorted(results.findings, key=lambda x: x.total_score, reverse=True)[:5]
 
         for i, finding in enumerate(top_findings, 1):
-            severity_emoji = {
-                5: "🚨", 4: "🔴", 3: "🟡", 2: "🟢", 1: "ℹ️"
-            }.get(finding.severity.value, "❓")
+            severity_tag = {
+                5: "[!!]", 4: "[!]", 3: "[*]", 2: "[-]", 1: "[i]"
+            }.get(finding.severity.value, "[?]")
 
             path_display = finding.file_path
             if len(path_display) > 50:
                 path_display = "..." + path_display[-47:]
 
-            print(f"  {i}. {severity_emoji} {path_display}")
+            print(f"  {i}. {severity_tag} {path_display}")
             print(f"     Score: {finding.total_score} | Signals: {len(finding.signals)}")
 
     if results.errors:
-        print(f"\n⚠️  {len(results.errors)} errors encountered during scan")
+        print(f"\n  [!] {len(results.errors)} errors encountered during scan")
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -567,7 +567,7 @@ def main() -> int:
             return 0  # Normal completion
 
     except KeyboardInterrupt:
-        print("\n❌ Scan interrupted by user")
+        print("\nScan interrupted by user")
         return 130
     except Exception as e:
         logger.error(f"Scan failed: {e}")
