@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -122,6 +123,8 @@ class ScanContext:
                  grabbers_enabled: bool = True,
                  enabled_grabbers: list[str] | None = None,
                  lateral_config: Any = None,
+                 modified_since: datetime | None = None,
+                 show_progress: bool = True,
                  **_extra: Any):  # Accept extra profile kwargs gracefully
         self.target_paths = target_paths
         self.max_threads = max_threads
@@ -133,6 +136,8 @@ class ScanContext:
         self.grabbers_enabled = grabbers_enabled
         self.enabled_grabbers = enabled_grabbers  # None = all default-enabled
         self.lateral_config = lateral_config
+        self.modified_since = modified_since
+        self.show_progress = show_progress
 
         # Scan state
         self.start_time = datetime.now()
@@ -264,6 +269,10 @@ class FileAnalyzer:
             return True
         if metadata.extension.lower() in _SKIP_EXTENSIONS:
             return True
+        # Time-window filter: skip files older than --since cutoff
+        if self.context.modified_since and metadata.modified:
+            if metadata.modified < self.context.modified_since:
+                return True
         return False
 
     def _analyze_category(self, file_path: str, metadata: FileMetadata,
@@ -391,6 +400,7 @@ class TreasureScanner:
         self.context = context
         self.analyzer = FileAnalyzer(context)
         self._priority_counter = 0  # Tiebreaker for PriorityQueue comparison
+        self._progress_counter = 0  # Throttle progress output
 
     def scan(self) -> ScanResult:
         """Execute the complete three-phase scan."""
@@ -437,6 +447,11 @@ class TreasureScanner:
             logger.error(f"Scan failed: {e}")
             self.context.add_error(f"Critical scan failure: {e}")
 
+        # Clear progress line
+        if self.context.show_progress:
+            sys.stderr.write("\r" + " " * 80 + "\r")
+            sys.stderr.flush()
+
         completed_at = datetime.now()
 
         # Collect grabber results
@@ -464,6 +479,20 @@ class TreasureScanner:
 
         return result
 
+    def _emit_progress(self, phase: str, detail: str = "") -> None:
+        """Write a progress line to stderr if progress output is enabled."""
+        if not self.context.show_progress:
+            return
+        elapsed = (datetime.now() - self.context.start_time).total_seconds()
+        findings = len(self.context.findings)
+        files = self.context.files_scanned
+        msg = f"\r  [{phase}] {elapsed:.0f}s | {files:,} files | {findings} findings"
+        if detail:
+            msg += f" | {detail}"
+        # Pad to overwrite previous line
+        sys.stderr.write(msg.ljust(80) + "\r")
+        sys.stderr.flush()
+
     def _recon_phase(self) -> PriorityQueue:
         """Phase 1: Quick metadata sweep to identify high-value targets."""
         logger.info("Phase 1: Reconnaissance")
@@ -488,6 +517,7 @@ class TreasureScanner:
                     self.context.add_error(f"Recon failed: {e}")
 
         logger.info(f"Recon complete: {priority_queue.qsize()} priority files identified")
+        self._emit_progress("RECON", f"{priority_queue.qsize()} priority files")
         return priority_queue
 
     def _recon_directory(self, dir_path: str, priority_queue: PriorityQueue) -> None:
@@ -544,6 +574,7 @@ class TreasureScanner:
 
             # Wait for remaining analyses to complete
             self._wait_for_completion(futures)
+            self._emit_progress("TARGETED", "complete")
 
     def _grabber_phase(self) -> None:
         """Phase 2.5: Execute grabber modules to extract credential data."""
@@ -590,8 +621,17 @@ class TreasureScanner:
                 for error in result.errors:
                     self.context.add_error(f"[{module.name}] {error}")
 
-        total_creds = len(self._grabber_context.all_credentials)
+        # Deduplicate credentials across all grabber modules
+        from .grabbers.models import deduplicate_credentials
+        raw_count = len(self._grabber_context.all_credentials)
+        deduped = deduplicate_credentials(self._grabber_context.all_credentials)
+        with self._grabber_context._lock:
+            self._grabber_context.all_credentials = deduped
+        total_creds = len(deduped)
+        if raw_count > total_creds:
+            logger.info(f"Deduped credentials: {raw_count} -> {total_creds}")
         logger.info(f"Grabber phase complete: {total_creds} credentials extracted")
+        self._emit_progress("GRABBER", f"{total_creds} credentials")
 
     def _lateral_phase(self) -> None:
         """Phase 4: Lateral movement -- test extracted creds against network hosts."""
@@ -660,6 +700,9 @@ class TreasureScanner:
                 return
 
             self.context.increment_counters(files=1)
+            self._progress_counter += 1
+            if self._progress_counter % 200 == 0:
+                self._emit_progress("SCAN")
 
             finding = self.analyzer.analyze_file(file_path, metadata)
             if finding:

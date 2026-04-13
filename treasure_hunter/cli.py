@@ -341,6 +341,12 @@ OPERATIONAL SECURITY:
     )
 
     parser.add_argument(
+        '--since',
+        metavar='DATE',
+        help='Only score files modified after DATE (YYYY-MM-DD)'
+    )
+
+    parser.add_argument(
         '--html',
         metavar='FILE',
         help='Generate a self-contained HTML report'
@@ -541,6 +547,18 @@ def main() -> int:
 
         # Pass output path for real-time streaming
         context_kwargs['output_path'] = args.output
+
+        # Time-window filter
+        if args.since:
+            from datetime import datetime as _dt
+            try:
+                context_kwargs['modified_since'] = _dt.strptime(args.since, "%Y-%m-%d")
+            except ValueError:
+                print(f"Invalid date format: {args.since} (expected YYYY-MM-DD)")
+                return 1
+
+        # Progress indicator (disabled in quiet mode)
+        context_kwargs['show_progress'] = not args.quiet
 
         # Lateral movement configuration
         if args.lateral:

@@ -225,6 +225,28 @@ CREDENTIALS = ValueCategory(
         r"hvs\.[A-Za-z0-9]{24,}",
         # Terraform Cloud tokens
         r"[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9]{60,}",
+        # JWT tokens (base64-encoded JSON web tokens)
+        r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+        # Slack webhooks
+        r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+",
+        # Discord webhooks
+        r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+",
+        # GCP service account key files
+        r'"type"\s*:\s*"service_account"',
+        # Azure client secrets
+        r"(?:client_secret|AZURE_CLIENT_SECRET)\s*[=:]\s*[^\s;,]{20,}",
+        # Stripe API keys
+        r"(?:sk|pk)_(?:test|live)_[A-Za-z0-9]{20,}",
+        # Twilio account SID / auth token
+        r"(?:AC[a-f0-9]{32}|SK[a-f0-9]{32})",
+        # SendGrid API keys
+        r"SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}",
+        # NPM tokens
+        r"npm_[A-Za-z0-9]{36}",
+        # PyPI tokens
+        r"pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}",
+        # Docker registry auth blobs
+        r'"auth"\s*:\s*"[A-Za-z0-9+/=]{20,}"',
     ],
 )
 
@@ -318,6 +340,14 @@ INFRASTRUCTURE = ValueCategory(
         r"mongodb(?:\+srv)?://[\w\.\-:@]+",
         # Redis connection strings
         r"redis://[\w\.\-:@]+",
+        # SMTP with credentials
+        r"smtp://[^@\s]+:[^@\s]+@[\w.\-]+",
+        # MySQL with credentials
+        r"mysql://[^@\s]+:[^@\s]+@[\w.\-]+",
+        # PostgreSQL with credentials
+        r"postgres(?:ql)?://[^@\s]+:[^@\s]+@[\w.\-]+",
+        # SSH connection strings
+        r"ssh://[^@\s]+@[\w.\-]+",
     ],
 )
 

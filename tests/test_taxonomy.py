@@ -257,6 +257,62 @@ class TestContentPatternCoverage:
                 return
         assert False, "No git remote credential pattern matched"
 
+    def test_jwt_token(self):
+        import re
+        for pattern in CREDENTIALS.content_patterns:
+            if re.search(pattern, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkw.SflKxwRJSMeKKF2QT4fwp"):
+                return
+        assert False, "No JWT pattern matched"
+
+    def test_slack_webhook(self):
+        import re
+        for pattern in CREDENTIALS.content_patterns:
+            if re.search(pattern, "https://hooks.slack.com/services/T0ABCDEFG/B0ABCDEFG/xxxxxxxxxxxxxxxxxxxx"):
+                return
+        assert False, "No Slack webhook pattern matched"
+
+    def test_stripe_key(self):
+        import re
+        for pattern in CREDENTIALS.content_patterns:
+            if re.search(pattern, "sk_test_4eC39HqLyjWDarjtT1zdp7dc12345678"):
+                return
+        assert False, "No Stripe key pattern matched"
+
+    def test_sendgrid_key(self):
+        import re
+        for pattern in CREDENTIALS.content_patterns:
+            if re.search(pattern, "SG.aBcDeFgHiJkLmNoPqRsT12.UvWxYz0123456789AbCdEfGhIjKlMnOpQrStUvWxYz01"):
+                return
+        assert False, "No SendGrid key pattern matched"
+
+    def test_npm_token(self):
+        import re
+        for pattern in CREDENTIALS.content_patterns:
+            if re.search(pattern, "npm_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"):
+                return
+        assert False, "No NPM token pattern matched"
+
+    def test_mysql_connection_string(self):
+        import re
+        for pattern in INFRASTRUCTURE.content_patterns:
+            if re.search(pattern, "mysql://root:password123@db.corp.local:3306/production", re.IGNORECASE):
+                return
+        assert False, "No MySQL connection string pattern matched"
+
+    def test_postgres_connection_string(self):
+        import re
+        for pattern in INFRASTRUCTURE.content_patterns:
+            if re.search(pattern, "postgresql://admin:s3cret@10.0.0.5:5432/appdb", re.IGNORECASE):
+                return
+        assert False, "No PostgreSQL connection string pattern matched"
+
+    def test_smtp_connection_string(self):
+        import re
+        for pattern in INFRASTRUCTURE.content_patterns:
+            if re.search(pattern, "smtp://user:pass@mail.corp.local", re.IGNORECASE):
+                return
+        assert False, "No SMTP connection string pattern matched"
+
 
 class TestExtensionUniqueness:
     def test_no_typos_in_extensions(self):
