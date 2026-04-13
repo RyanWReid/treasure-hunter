@@ -1,45 +1,64 @@
-# Rubber Ducky / USB HID Payloads
+# Deployment Payloads
 
-DuckyScript payloads for deploying treasure-hunter via USB HID attack devices (Hak5 Rubber Ducky, O.MG Cable, Flipper Zero BadUSB, etc.).
+Two deployment modes. Same binary. No manual steps.
 
-## Payloads
+## USB Mode (Rubber Ducky / O.MG / Flipper)
 
-| Payload | Description | Duration | OPSEC |
-|---------|-------------|----------|-------|
-| `smash-grab.dd` | Fast smash-and-grab to USB storage | ~10s type + 5m scan | Low |
-| `stealth-exfil.dd` | Hidden window, encrypt output, eject | ~10s type + 5m scan | High |
-| `network-spray.dd` | Scan + lateral movement | ~10s type + 10m scan | Medium |
+**How it works:** Plug in USB. Walk away. Pull out when USB ejects itself.
 
-## Prerequisites
+The `--auto` flag handles everything:
+1. Detects it's running from removable drive
+2. Runs smash scan with all grabbers
+3. Encrypts output to `loot.jsonl.enc` on the USB
+4. Cleans Prefetch + PyInstaller temp traces
+5. Ejects the USB drive
 
-1. Build `treasure-hunter.exe` (8.2 MB) via PyInstaller:
+**Setup:**
+1. Build `treasure-hunter.exe` (8.2 MB):
    ```
    pip install pyinstaller
    pyinstaller --onefile --name treasure-hunter --console treasure_hunter/__main__.py
    ```
+2. Copy `dist/treasure-hunter.exe` to USB root
+3. Flash one of these payloads to your device:
 
-2. Copy `dist/treasure-hunter.exe` to the Ducky's mass storage as `D:\treasure-hunter.exe`
+| Payload | What it does |
+|---------|-------------|
+| `smash-grab.dd` | Local scan only (5 min) |
+| `stealth-exfil.dd` | Local + lateral movement (5 hosts) |
+| `network-spray.dd` | Triage scan + full subnet spray (30 min) |
 
-3. Compile the `.dd` payload for your device
+**Decrypt results on your machine:**
+```
+treasure-hunter --decrypt loot.jsonl.enc --passphrase 'CHANGE-ME'
+```
 
-## Device Setup
+## Device Drop Mode (RDP / SMB / Email)
 
-### Hak5 Rubber Ducky (USB-A)
-- Copy `treasure-hunter.exe` to MicroSD root
-- Compile `.dd` to `inject.bin` using DuckEncoder
-- MicroSD: `inject.bin` + `treasure-hunter.exe`
+**How it works:** Stage the exe on the target, run `--auto`. Output goes to `%TEMP%`.
 
-### O.MG Cable
-- Upload payload via O.MG web interface
-- Stage `treasure-hunter.exe` on the cable's mass storage
+```
+# On target (any of these work):
+treasure-hunter.exe --auto --passphrase 'my-key'
 
-### Flipper Zero (BadUSB)
-- Convert `.dd` to Flipper BadUSB format
-- Stage exe via separate USB or network download
+# Or use the stager script:
+powershell -w hidden -ep bypass -f stager.ps1
+```
 
-## Notes
+Results land at `%TEMP%\th-results.jsonl.enc`. Retrieve via your C2 or access method.
 
-- All payloads assume the USB device mounts as drive `D:\`
-- Adjust drive letter in the payload if your device mounts differently
-- The `DELAY` values are conservative -- reduce for faster machines
-- `--encrypt` requires a passphrase -- change it from the default before deployment
+## Important
+
+- **Change the passphrase** from `CHANGE-ME` before every engagement
+- The `DELAY` values in DuckyScript are conservative (2s) -- reduce for faster machines
+- All payloads assume the exe is named `treasure-hunter.exe` on the USB root
+- `--auto` auto-detects USB vs local and adjusts output path accordingly
+
+## Cleanup
+
+`--auto` mode automatically:
+- Removes PyInstaller `_MEIxxxxx` temp folders
+- Deletes Prefetch entries (if running as admin)
+- Ejects USB drive (USB mode only)
+
+For manual cleanup after device drop: run `cleanup.ps1`

