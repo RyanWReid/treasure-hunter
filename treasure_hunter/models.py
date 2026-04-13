@@ -112,6 +112,7 @@ class ScanResult:
     skipped_paths: list[str] = field(default_factory=list)
     grabber_results: list[Any] = field(default_factory=list)  # list[GrabberResult]
     lateral_result: Any = None  # LateralResult when lateral movement is enabled
+    credential_audit: Any = None  # CredentialAuditResult from post-grabber analysis
 
     @property
     def critical_findings(self) -> list[Finding]:
@@ -155,6 +156,8 @@ class ScanResult:
             ]
         if self.lateral_result:
             result["lateral_result"] = self.lateral_result.to_dict()
+        if self.credential_audit:
+            result["credential_audit"] = self.credential_audit.to_dict()
         return result
 
 
