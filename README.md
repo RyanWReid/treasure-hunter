@@ -6,6 +6,12 @@ Red team file discovery, credential extraction, and lateral movement tool. Scans
 
 **397 tests** | **19 grabber modules** | **548 detection patterns** | **Lateral movement** | **Credential audit** | **USB auto-deploy**
 
+## Captain's Deck -- Interactive Console
+
+![Captain's Deck](docs/captains-deck.png)
+
+Launch with `treasure-hunter -i` -- pirate-themed interactive operator console with arrow key navigation, color-coded severity, animated spinners, and step-by-step engagement workflow.
+
 ## How It Works
 
 ```mermaid
