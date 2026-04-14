@@ -472,7 +472,7 @@ def menu_select(options: list[str], title: str = '', selected: int = 0) -> int:
                 selected += 1
             elif key in ('\r', '\n'):
                 return selected
-            elif key == 'q':
+            elif key in ('q', 'esc', 'b'):
                 return -1
             elif key.isdigit() and 1 <= int(key) <= len(options):
                 return int(key) - 1
