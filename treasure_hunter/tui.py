@@ -409,16 +409,17 @@ def getch() -> str:
         old = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
-            ch = sys.stdin.read(1)
-            if ch == '\x1b':
+            ch = os.read(fd, 1)
+            if ch == b'\x1b':
                 import select
-                if select.select([sys.stdin], [], [], 0.05)[0]:
-                    seq = sys.stdin.read(2)
+                # Wait longer for the rest of the escape sequence
+                if select.select([sys.stdin], [], [], 0.15)[0]:
+                    seq = os.read(fd, 5).decode('utf-8', errors='ignore')
                     _MAP = {'[A': 'up', '[B': 'down', '[C': 'right', '[D': 'left',
-                            '[H': 'home', '[F': 'end', '[5': 'pgup', '[6': 'pgdn'}
+                            '[H': 'home', '[F': 'end', '[5~': 'pgup', '[6~': 'pgdn'}
                     return _MAP.get(seq, f'esc:{seq}')
                 return 'esc'
-            return ch
+            return ch.decode('utf-8', errors='ignore')
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
@@ -456,8 +457,11 @@ def menu_select(options: list[str], title: str = '', selected: int = 0) -> int:
                 selected += 1
             elif key in ('\r', '\n'):
                 return selected
-            elif key in ('q', '\x1b'):
+            elif key == 'q':
                 return -1
+            # Number keys for direct selection (1-9)
+            elif key.isdigit() and 1 <= int(key) <= len(options):
+                return int(key) - 1
 
             # Move cursor back up to redraw
             sys.stdout.write(f'\033[{len(options) + (2 if title else 1)}A')
