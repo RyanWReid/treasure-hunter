@@ -434,21 +434,36 @@ def prompt(text: str, prompt_color: tuple[int, int, int] | None = None) -> str:
 def menu_select(options: list[str], title: str = '', selected: int = 0) -> int:
     """Interactive single-select menu with arrow key navigation.
     Returns the selected index, or -1 if escaped."""
+    # Print title once (static)
+    if title:
+        sys.stdout.write(f'\n  {bold(title, THEME.accent)}\n')
+        sys.stdout.flush()
+
+    # Reserve lines for options
+    for _ in options:
+        sys.stdout.write('\n')
+    sys.stdout.flush()
+
+    num_lines = len(options)
     sys.stdout.write(HIDE_CURSOR)
+
     try:
         while True:
-            # Draw
-            sys.stdout.write(f'\r\033[K')
-            if title:
-                print(f'\n  {bold(title, THEME.accent)}')
+            # Move cursor to the start of the options block
+            sys.stdout.write(f'\033[{num_lines}A')
+
+            # Draw each option
             for i, opt in enumerate(options):
+                sys.stdout.write('\r\033[K')  # clear line
                 if i == selected:
-                    marker = color('\u25b6 ', THEME.primary)  # filled triangle
+                    marker = color('\u25b6 ', THEME.primary)
                     text = bold(opt, THEME.fg)
                 else:
                     marker = dim_text('  ')
                     text = dim_text(opt)
-                print(f'\r\033[K  {marker}{text}')
+                sys.stdout.write(f'  {marker}{text}\n')
+
+            sys.stdout.flush()
 
             key = getch()
             if key == 'up' and selected > 0:
@@ -459,14 +474,11 @@ def menu_select(options: list[str], title: str = '', selected: int = 0) -> int:
                 return selected
             elif key == 'q':
                 return -1
-            # Number keys for direct selection (1-9)
             elif key.isdigit() and 1 <= int(key) <= len(options):
                 return int(key) - 1
-
-            # Move cursor back up to redraw
-            sys.stdout.write(f'\033[{len(options) + (2 if title else 1)}A')
     finally:
         sys.stdout.write(SHOW_CURSOR)
+        sys.stdout.flush()
 
 
 # ============================================================
