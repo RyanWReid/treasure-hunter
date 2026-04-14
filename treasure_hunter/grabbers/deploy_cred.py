@@ -55,7 +55,7 @@ def _extract_unattend_passwords(file_path: str, content: str) -> list[dict]:
     for elem in root.iter():
         tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
 
-        if tag == "Password":
+        if tag.endswith("Password") or tag == "Password":
             value_elem = None
             for child in elem:
                 child_tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
