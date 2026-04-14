@@ -133,7 +133,7 @@ class CaptainsDeck:
 
             if not target_paths:
                 print(f'\n  {color("No accessible targets found", THEME.critical)}')
-                print(f'  {dim_text("Press any key...")}')
+                print(f'  {dim_text("[Enter] continue  [b] back")}')
                 getch()
                 return
 
@@ -182,7 +182,7 @@ class CaptainsDeck:
         ]
 
         print(panel(summary_lines, title='Voyage Report', width=50))
-        print(f'\n  {dim_text("Press any key to continue...")}')
+        print(f'\n  {dim_text("[Enter] continue  [b] back")}')
         getch()
 
     # ================================================================
@@ -193,7 +193,7 @@ class CaptainsDeck:
         if not self.scan_result or not self.scan_result.findings:
             clear()
             print(f'\n  {color("No findings to browse. Run a scan first.", THEME.dim)}')
-            print(f'  {dim_text("Press any key...")}')
+            print(f'  {dim_text("[Enter] continue  [b] back")}')
             getch()
             return
 
@@ -237,10 +237,10 @@ class CaptainsDeck:
             else:
                 print(f'  {dim_text("No findings match filter")}')
 
-            print(f'\n  {dim_text("[n]ext [p]rev [c]ritical [h]igh [m]edium [a]ll [q]back")}')
+            print(f'\n  {dim_text("[n]ext [p]rev [c]ritical [h]igh [m]edium [a]ll [b/q]back")}')
 
             key = getch()
-            if key in ('q', '\x1b'):
+            if key in ('q', 'b', 'esc', '\x1b'):
                 break
             elif key == 'n' and page < total_pages - 1:
                 page += 1
@@ -267,7 +267,7 @@ class CaptainsDeck:
         if not self.credentials:
             clear()
             print(f'\n  {color("No credentials extracted. Run a scan first.", THEME.dim)}')
-            print(f'  {dim_text("Press any key...")}')
+            print(f'  {dim_text("[Enter] continue  [b] back")}')
             getch()
             return
 
@@ -339,9 +339,9 @@ class CaptainsDeck:
                 if len(self.credentials) > 50:
                     print(f'  {dim_text(f"... and {len(self.credentials) - 50} more")}')
 
-            print(f'\n  {dim_text("[q] back")}')
+            print(f'\n  {dim_text("[b/q] back")}')
             key = getch()
-            if key in ('q', '\x1b'):
+            if key in ('q', 'b', 'esc', '\x1b'):
                 break
 
     # ================================================================
@@ -352,7 +352,7 @@ class CaptainsDeck:
         if not self.scan_result:
             clear()
             print(f'\n  {color("Run a scan first to extract credentials.", THEME.dim)}')
-            print(f'  {dim_text("Press any key...")}')
+            print(f'  {dim_text("[Enter] continue  [b] back")}')
             getch()
             return
 
@@ -362,7 +362,7 @@ class CaptainsDeck:
 
         if not self.credentials:
             print(f'  {color("No credentials available for lateral movement.", THEME.dim)}')
-            print(f'  {dim_text("Press any key...")}')
+            print(f'  {dim_text("[Enter] continue  [b] back")}')
             getch()
             return
 
@@ -417,7 +417,7 @@ class CaptainsDeck:
                 result_lines.append(f'{color("[-]", THEME.dim)} {t.host} -- {len(t.auth_results)} attempts, no access')
 
         print(panel(result_lines, title='Lateral Movement', width=55))
-        print(f'\n  {dim_text("Press any key...")}')
+        print(f'\n  {dim_text("[Enter] continue  [b] back")}')
         getch()
 
     # ================================================================
@@ -428,7 +428,7 @@ class CaptainsDeck:
         if not self.scan_result:
             clear()
             print(f'\n  {color("No scan results to export. Run a scan first.", THEME.dim)}')
-            print(f'  {dim_text("Press any key...")}')
+            print(f'  {dim_text("[Enter] continue  [b] back")}')
             getch()
             return
 
@@ -476,7 +476,7 @@ class CaptainsDeck:
             generate_html_report(self.scan_result, html_path)
             print(f'  {color("[+]", THEME.success)} HTML report: {html_path}')
 
-        print(f'\n  {dim_text("Press any key...")}')
+        print(f'\n  {dim_text("[Enter] continue  [b] back")}')
         getch()
 
 
