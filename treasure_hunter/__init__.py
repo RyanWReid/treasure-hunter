@@ -36,7 +36,7 @@ from .models import Finding, FileMetadata, ScanResult, Severity, compute_severit
 from .reporter import StreamingReporter
 from .scanner import ScanContext, TreasureScanner
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 __author__ = "treasure-hunter development team"
 
 __all__ = [
