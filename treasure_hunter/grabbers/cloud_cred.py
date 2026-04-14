@@ -98,8 +98,9 @@ class CloudCredGrabber(GrabberModule):
                 continue
 
             # For directory targets (like AWS SSO cache), pass path as content
-            if os.path.isdir(path):
-                content = path  # parser will handle directory scanning
+            is_dir = os.path.isdir(path)
+            if is_dir:
+                content = ""  # directory parsers use path directly
             else:
                 content = safe_read_text(path)
                 if not content:
@@ -107,7 +108,13 @@ class CloudCredGrabber(GrabberModule):
 
             try:
                 parser = getattr(self, parser_name)
-                creds = parser(path, content, app_name)
+                # Directory-aware parsers get the path; file parsers get content
+                if is_dir and parser_name == "_parse_aws_sso_cache":
+                    creds = parser(path, content, app_name)
+                elif is_dir:
+                    creds = []  # skip non-directory-aware parsers for dirs
+                else:
+                    creds = parser(path, content, app_name)
                 result.credentials.extend(creds)
 
                 if creds:
