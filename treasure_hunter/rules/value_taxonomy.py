@@ -60,6 +60,16 @@ CREDENTIALS = ValueCategory(
         ".htpasswd", ".netrc", ".npmrc", ".pypirc",
         # Database password files
         ".pgpass", ".mylogin.cnf",
+        # Remote Desktop Connection Manager
+        ".rdg",
+        # RSA SecurID tokens
+        ".sdtid", ".rtsz",
+        # VMware config (embedded passwords)
+        ".vmx",
+        # Azure Cloud Service config
+        ".cscfg",
+        # Network captures (may contain credentials)
+        ".pcap", ".cap", ".pcapng",
     ],
     filename_keywords=[
         "password", "passwd", "passwords", "credential", "credentials",
@@ -85,6 +95,16 @@ CREDENTIALS = ValueCategory(
         "git-credentials",
         # Vault token
         "vault-token",
+        # Deployment files with embedded credentials
+        "unattend", "autounattend", "sysprep",
+        # IIS configuration
+        "web.config", "applicationhost",
+        # Password manager vaults
+        "data.json",  # Bitwarden
+        "credentials-config",  # DBeaver
+        # Cloud token caches
+        "msal_token_cache", "msal.cache",
+        "azurermcontext", "tokencache",
     ],
     path_patterns=[
         # ---------------------------------------------------------------
@@ -194,6 +214,23 @@ CREDENTIALS = ValueCategory(
         r"*\AppData\Local\Packages\Microsoft.MicrosoftStickyNotes*\LocalState\plum.sqlite",
         # WiFi profiles (SSID + cleartext passwords)
         r"*\ProgramData\Microsoft\Wlansvc\Profiles\Interfaces\*",
+        # Azure MSAL token cache
+        r"*\AppData\Local\.IdentityService\*",
+        # AWS SSO token cache
+        r"*\.aws\sso\cache\*",
+        # GCP OAuth credentials database
+        r"*\AppData\Roaming\gcloud\credentials.db",
+        # Windows deployment files with credentials
+        r"*\Windows\Panther\Unattend.xml",
+        r"*\Windows\Panther\unattend.xml",
+        r"*\Windows\System32\sysprep\*",
+        # IIS web.config
+        r"*\inetpub\wwwroot\web.config",
+        # Password manager vaults
+        r"*\AppData\Roaming\Bitwarden\data.json",
+        r"*\AppData\Local\1Password\data\*",
+        # WSL filesystem (accessible from Windows)
+        r"*\AppData\Local\Packages\CanonicalGroupLimited.Ubuntu*\LocalState\rootfs\*",
     ],
     content_patterns=[
         # AWS keys
@@ -247,6 +284,13 @@ CREDENTIALS = ValueCategory(
         r"pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}",
         # Docker registry auth blobs
         r'"auth"\s*:\s*"[A-Za-z0-9+/=]{20,}"',
+        # Unattend.xml / sysprep deployment passwords (Base64-encoded)
+        r"<Password>.*?<Value>",
+        r"<AutoLogon>",
+        # web.config / IIS connection strings with passwords
+        r"connectionString.*?(?:password|pwd)\s*=",
+        # IIS app pool identity passwords
+        r"<identity\s+impersonate.*?password",
     ],
 )
 

