@@ -1,13 +1,13 @@
 # Treasure Hunter
 
-**The tool you grab on every engagement.** One binary. Zero dependencies. Drop it on a target and walk away with everything -- passwords, tokens, keys, configs, credentials from 19 application types, and a full credential quality audit. Then use what you found to move laterally across the network.
+**The tool you grab on every engagement.** One binary. Zero dependencies. Drop it on a target and walk away with everything -- passwords, tokens, keys, configs, credentials from 27 application types, and a full credential quality audit. Then use what you found to move laterally across the network.
 
 Built for red team operators who need fast, reliable credential extraction without installing anything. Compiles to a single **8.2 MB executable** that runs from a USB Rubber Ducky, a device drop, or an interactive operator console.
 
 ### Why Treasure Hunter?
 
-- **19 grabber modules** extract credentials from browsers, cloud CLIs, remote access tools, git stores, messaging apps, email clients, WiFi profiles, Windows Vault, Group Policy, scheduled tasks, and more
-- **548 detection patterns** across 6 weighted value categories with additive scoring
+- **27 grabber modules** extract credentials from browsers, cloud CLIs, remote access tools, database clients, git stores, messaging apps, email clients, WiFi profiles, Windows Vault, Credential Manager, Group Policy, scheduled tasks, password managers, crypto wallets, WSL filesystems, environment variables, deployment configs, and more
+- **581 detection patterns** across 6 weighted value categories with additive scoring
 - **Lateral movement** tests stolen credentials against network hosts via SMB admin shares
 - **Credential quality audit** flags password reuse, weak passwords, and high-value admin accounts
 - **Zero external dependencies** -- pure Python stdlib + ctypes. No pip install on target
@@ -15,7 +15,7 @@ Built for red team operators who need fast, reliable credential extraction witho
 - **Fire-and-forget** `--auto` mode: scan, encrypt, cleanup traces, eject USB. One command
 - **Interactive Captain's Deck** console for step-by-step engagement control
 - **OPSEC-conscious** -- encrypted output, no subprocess calls, CONNECT_TEMPORARY SMB, auto-cleanup of forensic traces
-- **397 tests** rigorously validated against real Windows Server 2022 environments
+- **517 tests** including hardened edge-case, exact-value, and adversarial input tests -- validated against real Windows Server 2022
 
 ### Battle-Tested
 
@@ -27,7 +27,7 @@ Treasure Hunter has been rigorously tested across multiple environments:
 | PyInstaller .exe standalone | 8.2 MB, all 19 grabber modules functional |
 | macOS (development) | Full scan engine + file-based grabbers operational |
 | GitHub Actions CI | Linux + Windows + macOS, Python 3.10-3.12 |
-| Unit test suite | 397 tests covering every module, zero failures |
+| Unit test suite | 517 tests including hardened edge-case + exact-value assertions |
 | Credential dedup | 42 raw credentials deduplicated to 37 unique |
 | Real-world fixtures | Tests use actual Windows XML formats, SQLite schemas, config files |
 
@@ -35,15 +35,15 @@ Treasure Hunter has been rigorously tested across multiple environments:
 
 | | |
 |---|---|
-| **Grabber Modules** | 19 (browser, cloud, remote access, git, dev tools, messaging, history, notes, email, wifi, DPAPI, registry, certs, clipboard, process, session, vault, GPP, schtask) |
-| **Detection Patterns** | 548 across 6 value categories |
+| **Grabber Modules** | 27 (browser, cloud, remote access, db clients, git, dev tools, messaging, history, notes, email, wifi, DPAPI, registry, certs, clipboard, process, session, vault, GPP, schtask, recon, deploy creds, env secrets, password managers, crypto wallets, WSL, network recon) |
+| **Detection Patterns** | 581 across 6 value categories |
 | **Scan Profiles** | smash (5m), triage (30m), full (unlimited), stealth (low profile) |
 | **Lateral Movement** | SMB credential spray with lockout protection |
 | **Output** | JSONL streaming, encrypted, HTML reports |
 | **Deployment** | USB Rubber Ducky, device drop, interactive console |
 | **Dependencies** | None. Pure Python stdlib + ctypes |
 | **Binary Size** | 8.2 MB single executable |
-| **Tests** | 397, all passing |
+| **Tests** | 517, all passing (includes hardened adversarial tests) |
 
 ## Captain's Deck -- Interactive Console
 
@@ -229,7 +229,7 @@ flowchart LR
 
 ## Credential Extraction
 
-**19 grabber modules** parse and extract actual credential data:
+**27 grabber modules** parse and extract actual credential data:
 
 ```mermaid
 flowchart TD
@@ -303,6 +303,14 @@ flowchart TD
 | `vault` | Windows Vault (web + Windows stored credentials) | Vault API ctypes |
 | `gpp` | Group Policy Preferences cpassword (MS14-025) | AES-256-CBC decrypt |
 | `schtask` | Scheduled tasks with stored passwords, inline creds | XML parse |
+| `recon` | AV/EDR detection, UAC, Credential Guard, Sysmon, PS logging | Registry + process |
+| `deploy_cred` | Unattend.xml, sysprep, web.config, IIS applicationHost.config | Base64 + XML |
+| `env_secrets` | Environment variable secrets (DATABASE_URL, API keys, tokens) | Pattern match |
+| `password_mgr` | Bitwarden, 1Password, LastPass, Dashlane, KeePass vault discovery | File discovery |
+| `db_client` | DBeaver, Robo3T, pgAdmin, JetBrains DataGrip, HeidiSQL | JSON/XML/Registry |
+| `wsl` | SSH keys, history, .env, cloud creds from WSL Linux filesystem | File access |
+| `net_recon` | ARP table, DNS cache, TCP connections, listening ports | ctypes / /proc |
+| `crypto_wallet` | Bitcoin, Electrum, Exodus, MetaMask, Ledger, Monero, Ethereum | File discovery |
 | `process` | Process memory string scanning (disabled by default) | Memory read |
 | `clipboard` | Windows clipboard history + current clipboard | SQLite + ctypes |
 
@@ -580,7 +588,14 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-397 tests covering every module: scanner engine, 19 grabber modules, lateral movement, credential audit, crypto, delta scanning, exfil staging, network discovery, HTML reports, JSONL streaming, and all data models.
+517 tests with hardened assertions covering every module:
+
+- **27 grabber modules** with realistic fixtures (real XML formats, SQLite schemas, config files)
+- **Exact value assertions**: verify precise credential values, not just "found something"
+- **Edge cases**: malformed inputs, unicode, symlink loops, binary files, BOM encoding
+- **False positive prevention**: code comments and log files must NOT trigger findings
+- **Concurrent safety**: thread-safe counters verified under multi-thread load
+- **End-to-end pipeline**: scan -> score -> dedup -> audit -> serialize chain
 
 CI runs tests on Linux, Windows, and macOS across Python 3.10-3.12 via GitHub Actions.
 
@@ -659,6 +674,9 @@ flowchart LR
 | Network Share Discovery | T1135 | network |
 | Group Policy Preferences | T1552.006 | gpp |
 | Scheduled Task/Job | T1053.005 | schtask |
+| Security Software Discovery | T1518.001 | recon |
+| System Network Config Discovery | T1016 | net_recon |
+| System Network Connections Discovery | T1049 | net_recon |
 
 ## Disclaimer
 
