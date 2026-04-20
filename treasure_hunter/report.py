@@ -45,7 +45,7 @@ def generate_html_report(results: ScanResult, output_path: str) -> None:
 
     # Build HTML
     findings_rows = ""
-    for i, f in enumerate(sorted_findings[:100], 1):
+    for i, f in enumerate(sorted_findings, 1):
         sev_class = f.severity.name.lower()
         path_display = html.escape(f.file_path)
         if len(path_display) > 80:
@@ -70,8 +70,8 @@ def generate_html_report(results: ScanResult, output_path: str) -> None:
             continue
         for cred in gr.credentials:
             cred_idx += 1
-            if cred_idx > 100:
-                break
+            if cred_idx > 500:
+                break  # safety cap for very large result sets
             cred_rows += f"""<tr>
                 <td>{cred_idx}</td>
                 <td>{html.escape(str(getattr(cred, 'source_module', '')))}</td>

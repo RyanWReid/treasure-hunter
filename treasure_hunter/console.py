@@ -271,6 +271,10 @@ class CaptainsDeck:
             getch()
             return
 
+        page = 0
+        page_size = max(get_terminal_size()[1] - 16, 5)
+        filter_type = None  # None = all
+
         while True:
             clear()
             print(f'\n  {gradient("Count the Gold", (255, 200, 0), (255, 150, 0))}')
@@ -305,11 +309,25 @@ class CaptainsDeck:
                 print()
                 print(panel(audit_lines, title='Credential Audit', width=60))
 
+            # Apply filter
+            if filter_type:
+                display_creds = [c for c in self.credentials if c.credential_type == filter_type]
+            else:
+                display_creds = self.credentials
+
+            total_pages = max(1, (len(display_creds) + page_size - 1) // page_size)
+            page = min(page, total_pages - 1)
+            start = page * page_size
+            end = min(start + page_size, len(display_creds))
+            page_creds = display_creds[start:end]
+
+            filter_str = f' [{filter_type}]' if filter_type else ' [ALL]'
+            print(f'\n  {dim_text(f"Page {page + 1}/{total_pages} -- {len(display_creds)} credentials{filter_str}")}')
+
             # Credentials table
-            print()
             headers = ['Source', 'Type', 'App', 'User', 'Value']
             rows = []
-            for cred in self.credentials[:50]:
+            for cred in page_creds:
                 val = cred.decrypted_value
                 if val and len(val) > 20:
                     val = val[:17] + '...'
@@ -336,13 +354,29 @@ class CaptainsDeck:
 
             if rows:
                 print(table(headers, rows))
-                if len(self.credentials) > 50:
-                    print(f'  {dim_text(f"... and {len(self.credentials) - 50} more")}')
+            else:
+                print(f'  {dim_text("No credentials match filter")}')
 
-            print(f'\n  {dim_text("[b/q] back")}')
+            print(f'\n  {dim_text("[n]ext [p]rev [P]asswords [T]okens [K]eys [a]ll [b/q]back")}')
             key = getch()
             if key in ('q', 'b', 'esc', '\x1b'):
                 break
+            elif key == 'n' and page < total_pages - 1:
+                page += 1
+            elif key == 'p' and page > 0:
+                page -= 1
+            elif key == 'P':
+                filter_type = 'password'
+                page = 0
+            elif key == 'T':
+                filter_type = 'token'
+                page = 0
+            elif key == 'K':
+                filter_type = 'key'
+                page = 0
+            elif key == 'a':
+                filter_type = None
+                page = 0
 
     # ================================================================
     # [4] Board Their Ship -- Lateral Movement
