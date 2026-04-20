@@ -237,7 +237,7 @@ class CaptainsDeck:
             else:
                 print(f'  {dim_text("No findings match filter")}')
 
-            print(f'\n  {dim_text("[n]ext [p]rev [c]ritical [h]igh [m]edium [a]ll [b/q]back")}')
+            print(f'\n  {dim_text("[n]ext [p]rev [c]ritical [h]igh [m]edium [a]ll [/]search [1-9]detail [b/q]back")}')
 
             key = getch()
             if key in ('q', 'b', 'esc', '\x1b'):
@@ -246,6 +246,24 @@ class CaptainsDeck:
                 page += 1
             elif key == 'p' and page > 0:
                 page -= 1
+            elif key == '/':
+                # Search mode
+                sys.stdout.write(SHOW_CURSOR)
+                search_term = prompt('  Search: ')
+                sys.stdout.write(HIDE_CURSOR)
+                if search_term:
+                    filter_sev = None
+                    display = [f for f in findings
+                              if search_term.lower() in f.file_path.lower()
+                              or any(search_term.lower() in s.description.lower() for s in f.signals)]
+                    page = 0
+                    # Override display for this iteration
+                    findings = display if display else findings
+            elif key.isdigit() and int(key) >= 1 and page_items:
+                # Detail view for numbered item
+                idx = int(key) - 1
+                if idx < len(page_items):
+                    self._show_finding_detail(page_items[idx])
             elif key == 'c':
                 filter_sev = 'critical'
                 page = 0
@@ -258,6 +276,47 @@ class CaptainsDeck:
             elif key == 'a':
                 filter_sev = None
                 page = 0
+
+    def _show_finding_detail(self, finding: Finding) -> None:
+        """Show full details for a single finding."""
+        clear()
+        print(f'\n  {gradient("Finding Detail", (255, 200, 0), (255, 120, 0))}')
+        print()
+
+        detail_lines = [
+            f'{bold("Path:", THEME.fg)} {finding.file_path}',
+            f'{bold("Severity:", THEME.fg)} {severity_badge(finding.severity.name.lower())} {finding.severity.name}',
+            f'{bold("Score:", THEME.fg)} {finding.total_score}',
+            '',
+            bold('Signals:', THEME.accent),
+        ]
+
+        for s in finding.signals:
+            detail_lines.append(
+                f'  {color(f"+{s.score}", THEME.success)} {s.description}'
+                + (f' ({dim_text(s.matched_value[:60])})' if s.matched_value else '')
+            )
+
+        if finding.metadata:
+            detail_lines.append('')
+            detail_lines.append(bold('Metadata:', THEME.accent))
+            m = finding.metadata
+            if m.size_bytes:
+                detail_lines.append(f'  Size: {m.size_bytes:,} bytes')
+            if m.modified:
+                detail_lines.append(f'  Modified: {m.modified.strftime("%Y-%m-%d %H:%M:%S")}')
+            if m.owner:
+                detail_lines.append(f'  Owner: {m.owner}')
+
+        if finding.content_snippets:
+            detail_lines.append('')
+            detail_lines.append(bold('Content Snippets:', THEME.accent))
+            for snippet in finding.content_snippets[:5]:
+                detail_lines.append(f'  {dim_text(snippet[:80])}')
+
+        print(panel(detail_lines, title='Finding', width=min(get_terminal_size()[0] - 4, 80)))
+        print(f'\n  {dim_text("[Enter] back")}')
+        getch()
 
     # ================================================================
     # [3] Count the Gold -- Credentials
@@ -474,12 +533,14 @@ class CaptainsDeck:
             'Save JSONL results',
             'Save encrypted JSONL',
             'Generate HTML report',
+            'Export creds (NetExec format)',
+            'Export creds (CSV)',
             'Save all (JSONL + encrypted + HTML)',
             'Back',
         ]
 
         choice = menu_select(options)
-        if choice in (-1, 4):
+        if choice in (-1, 6):
             return
 
         print()
@@ -504,11 +565,23 @@ class CaptainsDeck:
                 enc_path = encrypt_and_shred(jsonl_path, passphrase)
                 print(f'  {color("[+]", THEME.success)} Encrypted: {enc_path}')
 
-        if choice in (2, 3):
+        if choice in (2, 5):
             html_path = os.path.join(output_dir, 'report.html')
             from .report import generate_html_report
             generate_html_report(self.scan_result, html_path)
             print(f'  {color("[+]", THEME.success)} HTML report: {html_path}')
+
+        if choice == 3:
+            nxc_path = os.path.join(output_dir, 'creds-netexec.txt')
+            from .credential_export import export_credentials
+            export_credentials(self.credentials, 'netexec', nxc_path)
+            print(f'  {color("[+]", THEME.success)} NetExec creds: {nxc_path}')
+
+        if choice == 4:
+            csv_path = os.path.join(output_dir, 'creds.csv')
+            from .credential_export import export_credentials
+            export_credentials(self.credentials, 'csv', csv_path)
+            print(f'  {color("[+]", THEME.success)} CSV export: {csv_path}')
 
         print(f'\n  {dim_text("[Enter] continue  [b] back")}')
         getch()

@@ -471,6 +471,18 @@ OPERATIONAL SECURITY:
     )
 
     parser.add_argument(
+        '--export',
+        choices=['csv', 'netexec', 'plaintext', 'json'],
+        help='Export credentials in specified format (csv, netexec, plaintext, json)'
+    )
+
+    parser.add_argument(
+        '--export-file',
+        metavar='FILE',
+        help='Output file for credential export (default: stdout)'
+    )
+
+    parser.add_argument(
         '--no-grabbers',
         action='store_true',
         help='Disable all grabber modules (scan-only mode)'
@@ -766,6 +778,20 @@ def main() -> int:
             logger.info(f"Encrypted results: {enc_path} (plaintext shredded)")
             if not args.quiet:
                 print(f"\nResults encrypted: {enc_path}")
+
+        # Export credentials if requested
+        if args.export:
+            from .credential_export import export_credentials
+            all_creds = []
+            for gr in results.grabber_results:
+                if hasattr(gr, "credentials"):
+                    all_creds.extend(gr.credentials)
+            output = export_credentials(all_creds, args.export, args.export_file)
+            if args.export_file:
+                if not args.quiet:
+                    print(f"\nCredentials exported: {args.export_file} ({args.export} format)")
+            else:
+                print(output)
 
         # Generate HTML report if requested
         if args.html:

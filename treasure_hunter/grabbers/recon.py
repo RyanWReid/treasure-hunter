@@ -148,6 +148,21 @@ class ReconGrabber(GrabberModule):
         for finding in registry_findings:
             findings_text.append(finding)
 
+        # Enumerate Recycle Bin for deleted sensitive files
+        recycled = self._enumerate_recycle_bin()
+        if recycled:
+            findings_text.append(f"[*] Recycle Bin: {len(recycled)} interesting deleted file(s)")
+            for item in recycled[:10]:
+                result.credentials.append(ExtractedCredential(
+                    source_module=self.name,
+                    credential_type="token",
+                    target_application="Recycle Bin",
+                    url=item["path"],
+                    username=item["name"],
+                    notes=f"Deleted file: {item['name']} ({item['size']:,} bytes)",
+                    mitre_technique="T1005",
+                ))
+
         if findings_text:
             result.findings.append(self.make_finding(
                 file_path="[RECON] Security Configuration",
@@ -254,3 +269,55 @@ class ReconGrabber(GrabberModule):
             pass
 
         return findings
+
+    @staticmethod
+    def _enumerate_recycle_bin() -> list[dict]:
+        """Enumerate Recycle Bin for deleted sensitive files."""
+        interesting = []
+        interesting_exts = frozenset({
+            ".kdbx", ".kdb", ".pem", ".key", ".pfx", ".p12", ".env",
+            ".rdp", ".rdg", ".ovpn", ".sql", ".bak", ".dump",
+            ".pst", ".ost", ".sqlite", ".db", ".conf", ".config",
+            ".credentials", ".pgpass", ".netrc", ".npmrc", ".pypirc",
+        })
+
+        drives = ["C:\\"]
+        if platform.system() == "Windows":
+            for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+                drive = f"{letter}:\\"
+                if os.path.exists(drive):
+                    drives.append(drive)
+
+        for drive in drives:
+            recycle_bin = os.path.join(drive, "$Recycle.Bin")
+            if not os.path.isdir(recycle_bin):
+                continue
+
+            try:
+                for sid_dir in os.scandir(recycle_bin):
+                    if not sid_dir.is_dir():
+                        continue
+                    try:
+                        for entry in os.scandir(sid_dir.path):
+                            if not entry.is_file():
+                                continue
+                            name = entry.name
+                            ext = os.path.splitext(name)[1].lower()
+                            try:
+                                size = entry.stat().st_size
+                            except OSError:
+                                size = 0
+
+                            if ext in interesting_exts or size > 1024 * 1024:
+                                interesting.append({
+                                    "path": entry.path,
+                                    "name": name,
+                                    "size": size,
+                                    "ext": ext,
+                                })
+                    except (PermissionError, OSError):
+                        continue
+            except (PermissionError, OSError):
+                continue
+
+        return interesting

